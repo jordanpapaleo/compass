@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Apple code signing credentials for Compass.
+#
+# Copy this file to `sign.sh` (which is gitignored) and fill in the TODO values.
+# Reuse Jordan's existing Apple Developer identity — the same one Helm ships with.
+#
+# Usage: source sign.sh && npm run tauri build   (or just run ./release.sh)
+
+export APPLE_SIGNING_IDENTITY="Developer ID Application: TODO_NAME (TODO_TEAM_ID)"
+export APPLE_ID="TODO_APPLE_ID_EMAIL"
+export APPLE_PASSWORD="TODO_APP_SPECIFIC_PASSWORD"
+export APPLE_TEAM_ID="TODO_TEAM_ID"
+
+echo "✓ Apple signing environment set"
