@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { ulid } from "ulid";
 import { costUSD } from "./config.ts";
+import { getGitContext, type GitContext } from "./context/git.ts";
 import { appendLog, readLog } from "./log.ts";
 import { anthropicAdapter } from "./providers/anthropic.ts";
 import { geminiAdapter } from "./providers/gemini.ts";
@@ -59,11 +60,13 @@ async function logRequest(
     latencyMs: number;
     result?: CompletionResult;
     stream: boolean;
+    git?: GitContext | null;
   },
 ): Promise<void> {
   const entry: RoutingLogEntry = {
     id,
     ts: new Date().toISOString(),
+    ...(opts.git ? { git: opts.git } : {}),
     intent: decision.intent,
     intent_source: decision.intent_source,
     provider: decision.provider,
@@ -121,8 +124,9 @@ export function createApp(): Hono {
   app.post("/v1/route", async (c) => {
     const parsed = validate(await c.req.json().catch(() => null));
     if (!parsed.ok) return c.json({ error: { message: parsed.error } }, 400);
-    const decision = route(parsed.req, { availableProviders: availableProviders() });
-    return c.json({ decision });
+    const git = await getGitContext(c.req.header("x-compass-cwd"));
+    const decision = route(parsed.req, { availableProviders: availableProviders() }, { git });
+    return c.json({ decision, git });
   });
 
   app.get("/v1/routing-log", async (c) => {
@@ -136,7 +140,8 @@ export function createApp(): Hono {
     const req = parsed.req;
 
     const id = `cmpl-${ulid()}`;
-    const decision = route(req, { availableProviders: availableProviders() });
+    const git = await getGitContext(c.req.header("x-compass-cwd"));
+    const decision = route(req, { availableProviders: availableProviders() }, { git });
     const adapter = ADAPTERS[decision.provider];
     const started = performance.now();
 
@@ -147,6 +152,7 @@ export function createApp(): Hono {
         error,
         latencyMs: Math.round(performance.now() - started),
         stream: Boolean(req.stream),
+        git,
       });
       return c.json(
         { error: { message: error, type: "compass_provider_unavailable", compass: decision } },
@@ -208,6 +214,7 @@ export function createApp(): Hono {
                 latencyMs: Math.round(performance.now() - started),
                 ...(result ? { result } : {}),
                 stream: true,
+                git,
               });
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
@@ -217,6 +224,7 @@ export function createApp(): Hono {
                 error: message,
                 latencyMs: Math.round(performance.now() - started),
                 stream: true,
+                git,
               });
             } finally {
               controller.close();
@@ -236,7 +244,7 @@ export function createApp(): Hono {
     try {
       const result = await adapter.complete(params);
       const latencyMs = Math.round(performance.now() - started);
-      await logRequest(id, decision, { status: "ok", latencyMs, result, stream: false });
+      await logRequest(id, decision, { status: "ok", latencyMs, result, stream: false, git });
 
       const response: ChatCompletionResponse = {
         id,
@@ -269,6 +277,7 @@ export function createApp(): Hono {
         error: message,
         latencyMs: Math.round(performance.now() - started),
         stream: false,
+        git,
       });
       return c.json({ error: { message, type: "provider_error", compass: decision } }, 502);
     }

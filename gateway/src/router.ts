@@ -16,6 +16,7 @@
  */
 
 import { DEFAULT_MAX_TOKENS, TIER_MODELS, TIER_PROVIDER_ORDER, estimateTokens, type Tier } from "./config.ts";
+import type { GitContext } from "./context/git.ts";
 import { detectIntent, isIntent } from "./intent.ts";
 import type { ChatCompletionRequest, Intent, ProviderName, RoutingDecision } from "./types.ts";
 
@@ -42,7 +43,21 @@ export interface RouterEnv {
   availableProviders: ProviderName[];
 }
 
-export function route(req: ChatCompletionRequest, env: RouterEnv): RoutingDecision {
+export interface RouterContext {
+  git?: GitContext | null;
+}
+
+/** Working diffs above this size escalate VCS-related intents one tier. */
+const LARGE_DIFF_LINES = 800;
+
+/** Intents whose routing should consider repo state. */
+const VCS_INTENTS: Intent[] = ["pr-review", "pr-description", "commit-message"];
+
+export function route(
+  req: ChatCompletionRequest,
+  env: RouterEnv,
+  ctx: RouterContext = {},
+): RoutingDecision {
   const fullText = req.messages.map((m) => m.content).join("\n");
   const estTokens = estimateTokens(fullText);
   const reason: string[] = [];
@@ -94,6 +109,21 @@ export function route(req: ChatCompletionRequest, env: RouterEnv): RoutingDecisi
     );
   } else {
     reason.push(`Input ~${estTokens} tokens`);
+  }
+
+  // ── Git context (Day 2): repo facts inform VCS-related intents ───
+  const git = ctx.git;
+  if (git) {
+    reason.push(
+      `Git: branch "${git.branch}", ${git.changed_files} files changed (+${git.insertions}/-${git.deletions})${git.dirty ? ", dirty" : ""}`,
+    );
+    const diffLines = git.insertions + git.deletions;
+    if (VCS_INTENTS.includes(intent) && tier === "cheap" && diffLines > LARGE_DIFF_LINES) {
+      tier = "balanced";
+      reason.push(
+        `Working diff ${diffLines} lines exceeds ${LARGE_DIFF_LINES} — escalated to "balanced" for quality`,
+      );
+    }
   }
 
   // ── Provider selection by availability ───────────────────────────

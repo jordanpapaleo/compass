@@ -117,9 +117,19 @@ export interface ProviderAdapter {
 
 // ── Routing log entry (persisted JSONL, one line per request) ──────
 
+export interface GitContextSnapshot {
+  branch: string;
+  dirty: boolean;
+  changed_files: number;
+  insertions: number;
+  deletions: number;
+}
+
 export interface RoutingLogEntry {
   id: string;
   ts: string; // ISO 8601
+  /** Repo state at request time, when the client provided a cwd. */
+  git?: GitContextSnapshot | null;
   intent: Intent;
   intent_source: RoutingDecision["intent_source"];
   provider: ProviderName;

@@ -1,18 +1,7 @@
 import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
-
-const GATEWAY_URL = "http://localhost:4000";
-
-interface ProviderStatus {
-  name: string;
-  key_configured: boolean;
-}
-
-interface Health {
-  status: string;
-  service: string;
-  providers: ProviderStatus[];
-}
+import { RoutingLog } from "./components/RoutingLog";
+import { GATEWAY_URL, fetchHealth, type Health } from "./lib/gateway";
 
 type GatewayState =
   | { kind: "connecting" }
@@ -20,9 +9,8 @@ type GatewayState =
   | { kind: "offline" };
 
 /**
- * Compass shell — Day 1 surface: is the gateway sidecar up, and which
- * providers have keys? The full mission-control dashboard (routing log,
- * live requests, preference sliders) builds on top of this in Days 2–3.
+ * Compass shell — gateway status + routing log. The full mission-control
+ * dashboard (live requests, preference sliders) builds on this in Day 3.
  */
 export default function App() {
   const [gateway, setGateway] = useState<GatewayState>({ kind: "connecting" });
@@ -32,8 +20,7 @@ export default function App() {
 
     const poll = async () => {
       try {
-        const res = await fetch(`${GATEWAY_URL}/health`);
-        const health = (await res.json()) as Health;
+        const health = await fetchHealth();
         if (!cancelled) setGateway({ kind: "online", health });
       } catch {
         if (!cancelled) setGateway({ kind: "offline" });
@@ -59,45 +46,52 @@ export default function App() {
         <GatewayBadge state={gateway} />
       </header>
 
-      <main className="flex flex-1 items-center justify-center p-8">
-        <div className="card w-full max-w-md border border-[var(--color-border)] bg-base-200">
-          <div className="card-body">
-            <h2 className="card-title text-base">
-              <Icon icon="uil:server" className="text-xl" />
-              Gateway
-            </h2>
-
-            {gateway.kind === "connecting" ? (
-              <p className="text-sm text-[var(--color-text-muted)]">Connecting…</p>
-            ) : gateway.kind === "offline" ? (
-              <div className="text-sm">
-                <p className="text-error">Offline — no gateway on {GATEWAY_URL}</p>
-                <p className="mt-1 text-[var(--color-text-muted)]">
-                  Start it with <span className="code">cd gateway && npm run dev</span> or relaunch
-                  the app.
-                </p>
-              </div>
-            ) : (
-              <ul className="mt-1 flex flex-col gap-2">
-                {gateway.health.providers.map((p) => (
-                  <li key={p.name} className="flex items-center justify-between text-sm">
-                    <span className="capitalize">{p.name}</span>
-                    {p.key_configured ? (
-                      <span className="badge badge-success badge-sm gap-1">
-                        <Icon icon="uil:check" /> key configured
-                      </span>
-                    ) : (
-                      <span className="badge badge-ghost badge-sm gap-1">
-                        <Icon icon="uil:key-skeleton" /> no key
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
+      <main className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
+        <GatewayCard state={gateway} />
+        <RoutingLog />
       </main>
+    </div>
+  );
+}
+
+function GatewayCard({ state }: { state: GatewayState }) {
+  return (
+    <div className="card border border-[var(--color-border)] bg-base-200">
+      <div className="card-body py-4">
+        <h2 className="card-title text-base">
+          <Icon icon="uil:server" className="text-xl" />
+          Gateway
+        </h2>
+
+        {state.kind === "connecting" ? (
+          <p className="text-sm text-[var(--color-text-muted)]">Connecting…</p>
+        ) : state.kind === "offline" ? (
+          <div className="text-sm">
+            <p className="text-error">Offline — no gateway on {GATEWAY_URL}</p>
+            <p className="mt-1 text-[var(--color-text-muted)]">
+              Start it with <span className="code">cd gateway && npm run dev</span> or relaunch the
+              app.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-wrap gap-x-8 gap-y-2">
+            {state.health.providers.map((p) => (
+              <li key={p.name} className="flex items-center gap-2 text-sm">
+                <span className="capitalize">{p.name}</span>
+                {p.key_configured ? (
+                  <span className="badge badge-success badge-sm gap-1">
+                    <Icon icon="uil:check" /> key configured
+                  </span>
+                ) : (
+                  <span className="badge badge-ghost badge-sm gap-1">
+                    <Icon icon="uil:key-skeleton" /> no key
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

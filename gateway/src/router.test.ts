@@ -85,7 +85,7 @@ describe("routing rules", () => {
       availableProviders: ["openai"],
     });
     expect(d.provider).toBe("openai");
-    expect(d.model).toBe("gpt-4o");
+    expect(d.model).toBe("gpt-5.4"); // balanced tier (live-verified id)
   });
 
   it("still decides (flagged) when no provider has a key", () => {
@@ -116,5 +116,37 @@ describe("pricing", () => {
 
   it("estimates tokens at ~chars/4", () => {
     expect(estimateTokens("x".repeat(4000))).toBe(1000);
+  });
+});
+
+describe("git context (Day 2)", () => {
+  const bigDiff = {
+    branch: "feature/routing",
+    dirty: true,
+    changed_files: 12,
+    insertions: 700,
+    deletions: 300,
+  };
+
+  it("adds repo facts to the reason trail", () => {
+    const d = route(req("compass/commit-message", [user("write a commit message")]), env, {
+      git: { branch: "main", dirty: false, changed_files: 0, insertions: 0, deletions: 0 },
+    });
+    expect(d.reason.join(" ")).toMatch(/branch "main"/);
+  });
+
+  it("escalates VCS intents on large working diffs", () => {
+    const d = route(req("compass/pr-description", [user("write a PR description")]), env, {
+      git: bigDiff,
+    });
+    expect(d.model).toBe("claude-sonnet-5"); // balanced, escalated from cheap
+    expect(d.reason.join(" ")).toMatch(/diff 1000 lines exceeds 800/);
+  });
+
+  it("does NOT escalate non-VCS intents on large diffs", () => {
+    const d = route(req("compass/summarization", [user("summarize this doc")]), env, {
+      git: bigDiff,
+    });
+    expect(d.model).toBe("claude-haiku-4-5"); // stays cheap
   });
 });
