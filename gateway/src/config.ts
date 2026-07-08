@@ -22,9 +22,10 @@ export const TIER_MODELS: Record<ProviderName, Record<Tier, string>> = {
     premium: "claude-opus-4-8",
   },
   openai: {
-    cheap: "gpt-4o-mini",
-    balanced: "gpt-4o",
-    premium: "gpt-4o", // update when a premium reasoning id is confirmed live
+    // Verified live against the models endpoint 2026-07-08 (gpt-5.4 family)
+    cheap: "gpt-5.4-mini",
+    balanced: "gpt-5.4",
+    premium: "gpt-5.4-pro",
   },
   gemini: {
     cheap: "gemini-2.0-flash",
@@ -39,7 +40,8 @@ export const PRICING: Record<string, [number, number]> = {
   "claude-haiku-4-5": [1.0, 5.0],
   "claude-sonnet-5": [3.0, 15.0],
   "claude-opus-4-8": [5.0, 25.0],
-  // OpenAI — approximate, verify
+  // OpenAI — gpt-5.4 pricing not yet verified; absent entries report cost null
+  // rather than a guessed number. Add [in, out] per MTok once confirmed.
   "gpt-4o-mini": [0.15, 0.6],
   "gpt-4o": [2.5, 10.0],
   // Gemini — approximate, verify
