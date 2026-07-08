@@ -74,9 +74,34 @@ Compass-aware clients (our dashboard) get explainability for free.
 A 503 (no key) or 502 (provider failure) still includes the routing decision
 and is still logged — failed routing attempts are data, not noise.
 
+### Tauri sidecar wiring: dev-mode spawn via system node
+The app spawns the gateway on launch (`spawn_gateway()` in `lib.rs`) using
+system `node` with cwd `gateway/`, kills it on `RunEvent::Exit`. Non-fatal on
+failure — the dashboard shows "gateway offline", and an externally-run
+gateway (e.g. `npm run dev`) is also fine (the child exits on port conflict).
+**Packaged builds** need a compiled sidecar binary bundled via Tauri's
+externalBin — deferred until first release; dev is the Day 1–4 environment.
+
+### Gateway CORS: short origin allowlist, not wildcard
+Found via live browser verification: the WebView's cross-origin fetch to
+`localhost:4000` was blocked (no CORS headers). Fixed with an allowlist of
+`http://localhost:1420`, `tauri://localhost`, `http://tauri.localhost` —
+deliberately NOT `*`/reflect-any-origin, or any website in the user's browser
+could drive completions (and spend API credit) through the local gateway.
+Non-browser clients (curl/SDKs) send no Origin and are unaffected.
+
+### Day 1 verification notes
+- OpenAI model ids verified against the live models endpoint (2026-07-08):
+  gpt-4o defaults were stale → gpt-5.4 family. Pricing for 5.4 not published
+  via API → cost reported as null until confirmed.
+- Live-completion gate blocked by OpenAI 429 (account quota, key valid —
+  models.list works). Compass-side pipeline verified: intent → route →
+  provider call → error handling → routing-log entry with latency.
+- Dashboard verified in a real browser against the running gateway:
+  online badge + per-provider key status render from live /health.
+
 ### Deferred (not needed for Day 1 gate)
-- Tauri sidecar wiring (spawn/supervise gateway from the app) — Day 2, needs
-  the app shell talking to the gateway anyway for the Routing Log view.
+- Packaged-app sidecar binary (externalBin) — first release.
 - Cross-provider fallback retry on provider *failure* (only key-absence
   fallback exists now) — Execution Engine work, spec'd for later days.
 - Anthropic prompt-caching passthrough, parallel/voting modes — future.

@@ -9,6 +9,7 @@
  */
 
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { ulid } from "ulid";
 import { costUSD } from "./config.ts";
 import { appendLog, readLog } from "./log.ts";
@@ -82,8 +83,28 @@ async function logRequest(
   await appendLog(entry).catch((e) => console.error("routing-log append failed:", e));
 }
 
+/**
+ * Origins allowed to call the gateway from a browser context. Deliberately a
+ * short allowlist, NOT a wildcard: a localhost API that reflects any Origin
+ * would let arbitrary websites drive completions (and spend API credit) via
+ * the user's browser. Non-browser clients (curl, SDKs) send no Origin and are
+ * unaffected by CORS.
+ */
+const ALLOWED_ORIGINS = [
+  "http://localhost:1420", // vite dev / tauri dev
+  "tauri://localhost", // packaged Tauri (macOS/Linux)
+  "http://tauri.localhost", // packaged Tauri (Windows)
+];
+
 export function createApp(): Hono {
   const app = new Hono();
+
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => (ALLOWED_ORIGINS.includes(origin) ? origin : null),
+    }),
+  );
 
   app.get("/health", (c) =>
     c.json({
