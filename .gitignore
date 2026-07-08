@@ -28,3 +28,8 @@ releases/**/*.app
 *.njsproj
 *.sln
 *.sw?
+
+# provider API keys
+.env
+.env.*
+!.env.example

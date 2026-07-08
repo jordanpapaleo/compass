@@ -1,0 +1,120 @@
+import { describe, expect, it } from "vitest";
+import { costUSD, estimateTokens } from "./config.ts";
+import { detectIntent } from "./intent.ts";
+import { route } from "./router.ts";
+import type { ChatCompletionRequest, ChatMessage } from "./types.ts";
+
+const user = (content: string): ChatMessage => ({ role: "user", content });
+
+const req = (model: string, messages: ChatMessage[]): ChatCompletionRequest => ({
+  model,
+  messages,
+});
+
+const ALL = { availableProviders: ["anthropic", "openai", "gemini"] as const };
+const env = { availableProviders: [...ALL.availableProviders] };
+
+describe("intent detection", () => {
+  it.each([
+    ["Review this PR please", "pr-review"],
+    ["Write a PR description for these changes", "pr-description"],
+    ["Write a commit message for this diff", "commit-message"],
+    ["Why does this test fail with TypeError: x is not a function", "debugging"],
+    ["Summarize this document, key points only", "summarization"],
+    ["Design the system architecture for our event pipeline", "architecture"],
+    ["Implement a function that parses YAML", "coding"],
+    ["Brainstorm ideas for onboarding flows", "brainstorming"],
+    ["hello there", "chat"],
+  ])("%s → %s", (text, expected) => {
+    expect(detectIntent([user(text)]).intent).toBe(expected);
+  });
+
+  it("weighs the last user message over earlier ones", () => {
+    const messages: ChatMessage[] = [
+      user("Implement a function to sort a list"),
+      { role: "assistant", content: "done" },
+      user("Now summarize what you did, key points"),
+    ];
+    expect(detectIntent(messages).intent).toBe("summarization");
+  });
+
+  it("scores zero for unmatched input and reports it", () => {
+    const r = detectIntent([user("good morning")]);
+    expect(r.intent).toBe("chat");
+    expect(r.score).toBe(0);
+  });
+});
+
+describe("routing rules", () => {
+  it("passthrough: concrete claude model → anthropic verbatim", () => {
+    const d = route(req("claude-haiku-4-5", [user("hi")]), env);
+    expect(d.rule).toBe("passthrough");
+    expect(d.provider).toBe("anthropic");
+    expect(d.model).toBe("claude-haiku-4-5");
+  });
+
+  it("passthrough: gpt-* → openai, gemini-* → gemini", () => {
+    expect(route(req("gpt-4o", [user("hi")]), env).provider).toBe("openai");
+    expect(route(req("gemini-2.0-flash", [user("hi")]), env).provider).toBe("gemini");
+  });
+
+  it("explicit intent via compass/<intent>", () => {
+    const d = route(req("compass/commit-message", [user("anything at all")]), env);
+    expect(d.intent).toBe("commit-message");
+    expect(d.intent_source).toBe("explicit");
+    expect(d.model).toBe("claude-haiku-4-5"); // cheap tier, anthropic preferred
+  });
+
+  it("compass/auto detects intent and maps tier", () => {
+    const d = route(req("compass/auto", [user("Design the architecture for a queue system")]), env);
+    expect(d.intent).toBe("architecture");
+    expect(d.model).toBe("claude-opus-4-8"); // premium tier
+    expect(d.intent_source).toBe("detected");
+  });
+
+  it("size escalation bumps cheap → balanced on large input", () => {
+    const big = "x".repeat(60_000); // ~15k tokens > 12k threshold
+    const d = route(req("compass/summarization", [user(`Summarize this: ${big}`)]), env);
+    expect(d.intent).toBe("summarization");
+    expect(d.model).toBe("claude-sonnet-5"); // balanced, not haiku
+    expect(d.reason.join(" ")).toMatch(/escalated/i);
+  });
+
+  it("falls to next provider in tier order when preferred has no key", () => {
+    const d = route(req("compass/coding", [user("implement a function")]), {
+      availableProviders: ["openai"],
+    });
+    expect(d.provider).toBe("openai");
+    expect(d.model).toBe("gpt-4o");
+  });
+
+  it("still decides (flagged) when no provider has a key", () => {
+    const d = route(req("compass/coding", [user("implement a function")]), {
+      availableProviders: [],
+    });
+    expect(d.provider).toBe("anthropic"); // preference order fallback
+    expect(d.reason.join(" ")).toMatch(/NO API key/);
+  });
+
+  it("every decision carries a non-empty reason trail", () => {
+    const d = route(req("compass/auto", [user("review this pull request diff")]), env);
+    expect(d.reason.length).toBeGreaterThanOrEqual(3);
+    expect(d.rule).toMatch(/^intent-tier:pr-review/);
+  });
+});
+
+describe("pricing", () => {
+  it("computes anthropic costs from the verified table", () => {
+    // haiku: $1 in / $5 out per MTok
+    expect(costUSD("claude-haiku-4-5", 1_000_000, 1_000_000)).toBeCloseTo(6.0);
+    expect(costUSD("claude-opus-4-8", 10_000, 2_000)).toBeCloseTo(0.1);
+  });
+
+  it("returns null for unknown models rather than guessing", () => {
+    expect(costUSD("some-unknown-model", 1000, 1000)).toBeNull();
+  });
+
+  it("estimates tokens at ~chars/4", () => {
+    expect(estimateTokens("x".repeat(4000))).toBe(1000);
+  });
+});
