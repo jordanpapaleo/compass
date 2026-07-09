@@ -28,6 +28,7 @@ import {
   availableProviderNames,
   customProviderIds,
   customProviders,
+  customTierAssignments,
   getAdapter,
   isBuiltin,
   providerList,
@@ -159,6 +160,7 @@ export function createApp(): Hono {
         label: p.label,
         base_url: p.base_url,
         models: p.models,
+        tiers: p.tiers ?? null,
       })),
     }),
   );
@@ -174,6 +176,7 @@ export function createApp(): Hono {
         base_url: body.base_url,
         api_key: body.api_key,
         models: body.models,
+        ...(body.tiers ? { tiers: body.tiers } : {}),
       });
       await rebuildCustomAdapters();
       return c.json({ ok: true });
@@ -200,7 +203,7 @@ export function createApp(): Hono {
     ]);
     const decision = route(
       parsed.req,
-      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments() },
       { git, prefs, avgLatencyMs, overrides },
     );
     return c.json({ decision, git, preferences: prefs });
@@ -261,13 +264,18 @@ export function createApp(): Hono {
     ]);
     const decision = route(
       req,
-      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments() },
       { git, prefs, avgLatencyMs, overrides },
     );
-    const adapter = getAdapter(decision.provider);
     const started = performance.now();
 
-    if (!adapter || !adapter.available()) {
+    // Failover chain: the chosen provider, then its available alternates.
+    const attempts = [
+      { provider: decision.provider, model: decision.model },
+      ...(decision.alternates ?? []),
+    ].filter((a) => getAdapter(a.provider)?.available());
+
+    if (attempts.length === 0) {
       const error = `Provider "${decision.provider}" selected but not configured`;
       await logRequest(id, decision, {
         status: "error",
@@ -283,8 +291,7 @@ export function createApp(): Hono {
       );
     }
 
-    const params = {
-      model: decision.model,
+    const baseParams = {
       messages: req.messages,
       maxTokens: resolveMaxTokens(req),
       // Client temperature wins; otherwise the preference engine's choice.
@@ -295,6 +302,20 @@ export function createApp(): Hono {
           : {}),
     };
 
+    // The decision as it actually played out (annotated when we fail over).
+    const decisionFor = (
+      a: { provider: string; model: string },
+      failedOver: boolean,
+    ): RoutingDecision =>
+      failedOver
+        ? {
+            ...decision,
+            provider: a.provider,
+            model: a.model,
+            reason: [...decision.reason, `⚠ failed over to ${a.provider}/${a.model} after an error`],
+          }
+        : decision;
+
     // ── Streaming (SSE, OpenAI chunk framing) ────────────────────
     if (req.stream) {
       const created = Math.floor(Date.now() / 1000);
@@ -304,70 +325,81 @@ export function createApp(): Hono {
             const enc = new TextEncoder();
             const send = (data: object) =>
               controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`));
-            try {
-              const gen = adapter.stream(params);
-              let result: CompletionResult | undefined;
-              while (true) {
-                const { value, done } = await gen.next();
-                if (done) {
-                  result = value;
-                  break;
+            let settled = false;
+            for (let i = 0; i < attempts.length && !settled; i++) {
+              const a = attempts[i]!;
+              const eff = decisionFor(a, i > 0);
+              // biome-ignore lint/style/noNonNullAssertion: filtered to available adapters
+              const adapter = getAdapter(a.provider)!;
+              let emitted = false;
+              try {
+                const gen = adapter.stream({ ...baseParams, model: a.model });
+                let result: CompletionResult | undefined;
+                while (true) {
+                  const { value, done } = await gen.next();
+                  if (done) {
+                    result = value;
+                    break;
+                  }
+                  emitted = true;
+                  send({
+                    id,
+                    object: "chat.completion.chunk",
+                    created,
+                    model: a.model,
+                    choices: [{ index: 0, delta: { content: value }, finish_reason: null }],
+                  });
                 }
                 send({
                   id,
                   object: "chat.completion.chunk",
                   created,
-                  model: decision.model,
-                  choices: [{ index: 0, delta: { content: value }, finish_reason: null }],
+                  model: a.model,
+                  choices: [{ index: 0, delta: {}, finish_reason: result?.finishReason ?? "stop" }],
+                  usage: result
+                    ? {
+                        prompt_tokens: result.inputTokens,
+                        completion_tokens: result.outputTokens,
+                        total_tokens: result.inputTokens + result.outputTokens,
+                      }
+                    : undefined,
+                  compass: eff,
                 });
+                controller.enqueue(enc.encode("data: [DONE]\n\n"));
+                await logRequest(id, eff, {
+                  status: "ok",
+                  latencyMs: Math.round(performance.now() - started),
+                  ...(result ? { result } : {}),
+                  stream: true,
+                  git,
+                  prefs,
+                });
+                settled = true;
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                await logRequest(`${id}-a${i}`, eff, {
+                  status: "error",
+                  error: message,
+                  latencyMs: Math.round(performance.now() - started),
+                  stream: true,
+                  git,
+                  prefs,
+                });
+                // Fail over only if nothing was streamed yet and more remain.
+                if (emitted || i === attempts.length - 1) {
+                  try {
+                    send({ error: { message, type: "provider_error" } });
+                  } catch {
+                    /* client gone; already logged */
+                  }
+                  settled = true;
+                }
               }
-              send({
-                id,
-                object: "chat.completion.chunk",
-                created,
-                model: decision.model,
-                choices: [{ index: 0, delta: {}, finish_reason: result?.finishReason ?? "stop" }],
-                usage: result
-                  ? {
-                      prompt_tokens: result.inputTokens,
-                      completion_tokens: result.outputTokens,
-                      total_tokens: result.inputTokens + result.outputTokens,
-                    }
-                  : undefined,
-                compass: decision,
-              });
-              controller.enqueue(enc.encode("data: [DONE]\n\n"));
-              await logRequest(id, decision, {
-                status: "ok",
-                latencyMs: Math.round(performance.now() - started),
-                ...(result ? { result } : {}),
-                stream: true,
-                git,
-                prefs,
-              });
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              // The client may have disconnected — enqueue on a closed stream
-              // throws, and an unlogged request would be a hole in history.
-              try {
-                send({ error: { message, type: "provider_error" } });
-              } catch {
-                /* client gone; still log below */
-              }
-              await logRequest(id, decision, {
-                status: "error",
-                error: message,
-                latencyMs: Math.round(performance.now() - started),
-                stream: true,
-                git,
-                prefs,
-              });
-            } finally {
-              try {
-                controller.close();
-              } catch {
-                /* already closed by cancellation */
-              }
+            }
+            try {
+              controller.close();
+            } catch {
+              /* already closed by cancellation */
             }
           },
         }),
@@ -380,48 +412,56 @@ export function createApp(): Hono {
       );
     }
 
-    // ── Non-streaming ────────────────────────────────────────────
-    try {
-      const result = await adapter.complete(params);
-      const latencyMs = Math.round(performance.now() - started);
-      await logRequest(id, decision, { status: "ok", latencyMs, result, stream: false, git, prefs });
+    // ── Non-streaming (with failover) ────────────────────────────
+    let lastError = "provider error";
+    for (let i = 0; i < attempts.length; i++) {
+      const a = attempts[i]!;
+      const eff = decisionFor(a, i > 0);
+      // biome-ignore lint/style/noNonNullAssertion: filtered to available adapters
+      const adapter = getAdapter(a.provider)!;
+      try {
+        const result = await adapter.complete({ ...baseParams, model: a.model });
+        const latencyMs = Math.round(performance.now() - started);
+        await logRequest(id, eff, { status: "ok", latencyMs, result, stream: false, git, prefs });
 
-      const response: ChatCompletionResponse = {
-        id,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: decision.model,
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: result.text },
-            finish_reason: result.finishReason,
+        const response: ChatCompletionResponse = {
+          id,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: a.model,
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: result.text },
+              finish_reason: result.finishReason,
+            },
+          ],
+          usage: {
+            prompt_tokens: result.inputTokens,
+            completion_tokens: result.outputTokens,
+            total_tokens: result.inputTokens + result.outputTokens,
           },
-        ],
-        usage: {
-          prompt_tokens: result.inputTokens,
-          completion_tokens: result.outputTokens,
-          total_tokens: result.inputTokens + result.outputTokens,
-        },
-        compass: {
-          ...decision,
-          latency_ms: latencyMs,
-          cost_usd: costUSD(decision.model, result.inputTokens, result.outputTokens, decision.provider),
-        },
-      };
-      return c.json(response);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await logRequest(id, decision, {
-        status: "error",
-        error: message,
-        latencyMs: Math.round(performance.now() - started),
-        stream: false,
-        git,
-        prefs,
-      });
-      return c.json({ error: { message, type: "provider_error", compass: decision } }, 502);
+          compass: {
+            ...eff,
+            latency_ms: latencyMs,
+            cost_usd: costUSD(a.model, result.inputTokens, result.outputTokens, a.provider),
+          },
+        };
+        return c.json(response);
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        await logRequest(`${id}-a${i}`, eff, {
+          status: "error",
+          error: lastError,
+          latencyMs: Math.round(performance.now() - started),
+          stream: false,
+          git,
+          prefs,
+        });
+        // loop continues → try the next provider in the failover chain
+      }
     }
+    return c.json({ error: { message: lastError, type: "provider_error", compass: decision } }, 502);
   });
 
   return app;

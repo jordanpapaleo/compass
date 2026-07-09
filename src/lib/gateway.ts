@@ -86,6 +86,8 @@ export interface NewCustomProvider {
   base_url: string;
   api_key: string;
   models: string[];
+  /** Optional: assign models to tiers so compass/auto can route to this provider. */
+  tiers?: { cheap?: string; balanced?: string; premium?: string };
 }
 
 /** Returns an error message on failure, or null on success. */

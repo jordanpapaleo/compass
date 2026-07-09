@@ -56,6 +56,23 @@ export function customProviderIds(): string[] {
   return customMeta.map((c) => c.id);
 }
 
+/** Custom providers assigned to a tier — feeds compass/auto routing + failover. */
+export function customTierAssignments(): Array<{
+  provider: string;
+  tier: "cheap" | "balanced" | "premium";
+  model: string;
+}> {
+  const out: Array<{ provider: string; tier: "cheap" | "balanced" | "premium"; model: string }> = [];
+  for (const c of customMeta) {
+    if (!c.tiers) continue;
+    for (const tier of ["cheap", "balanced", "premium"] as const) {
+      const model = c.tiers[tier];
+      if (model) out.push({ provider: c.id, tier, model });
+    }
+  }
+  return out;
+}
+
 /** Names of every provider (built-in or custom) that is configured & usable. */
 export function availableProviderNames(): string[] {
   const all = { ...BUILTIN, ...custom };

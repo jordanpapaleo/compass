@@ -286,3 +286,42 @@ describe("preferences (Day 3)", () => {
     expect(d.model).toBe("claude-opus-4-8");
   });
 });
+
+describe("failover + custom-tier routing", () => {
+  it("decision carries alternates (failover chain) when several providers are available", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), {
+      availableProviders: ["anthropic", "openai", "gemini"],
+    });
+    expect(d.provider).toBe("anthropic"); // balanced, first available
+    expect(d.alternates?.map((a) => a.provider)).toEqual(["openai", "gemini"]);
+    expect(d.reason.join(" ")).toMatch(/Failover order/);
+  });
+
+  it("single available provider → no alternates", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), {
+      availableProviders: ["openai"],
+    });
+    expect(d.provider).toBe("openai");
+    expect(d.alternates).toBeUndefined();
+  });
+
+  it("a custom provider assigned to a tier is preferred for that tier", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), {
+      availableProviders: ["anthropic", "groq"],
+      customTiers: [{ provider: "groq", tier: "balanced", model: "llama-3.3-70b" }],
+    });
+    expect(d.provider).toBe("groq");
+    expect(d.model).toBe("llama-3.3-70b");
+    // anthropic becomes the failover
+    expect(d.alternates?.[0]?.provider).toBe("anthropic");
+  });
+
+  it("custom tier assignment only affects its own tier", () => {
+    const d = route(req("compass/architecture", [user("design the architecture")]), {
+      availableProviders: ["anthropic", "groq"],
+      customTiers: [{ provider: "groq", tier: "cheap", model: "llama-3.3-70b" }],
+    });
+    expect(d.provider).toBe("anthropic"); // premium tier, groq only serves cheap
+    expect(d.model).toBe("claude-opus-4-8");
+  });
+});

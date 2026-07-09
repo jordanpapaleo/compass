@@ -38,6 +38,12 @@ export interface CustomProvider {
   api_key: string;
   /** model ids this provider serves, e.g. ["llama-3.3-70b"]. */
   models: string[];
+  /**
+   * Optional: which model serves each routing tier. When set, this provider
+   * participates in compass/auto routing (preferred for that tier) and in
+   * failover. Omit to keep the provider explicit-selection only.
+   */
+  tiers?: { cheap?: string; balanced?: string; premium?: string };
 }
 
 export interface ProviderConfig {
@@ -121,6 +127,7 @@ export async function addCustomProvider(cp: CustomProvider): Promise<CustomProvi
     base_url: cp.base_url.trim(),
     api_key: cp.api_key.trim(),
     models: cp.models.map((m) => m.trim()).filter(Boolean),
+    ...(cp.tiers && Object.values(cp.tiers).some(Boolean) ? { tiers: cp.tiers } : {}),
   };
   if (!ID_RE.test(clean.id)) throw new Error("id must be lowercase letters/digits/hyphens");
   if (!clean.base_url || !clean.models.length) throw new Error("base_url and at least one model required");

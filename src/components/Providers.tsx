@@ -245,24 +245,33 @@ function KeyInput({
   );
 }
 
+const TIER_KEYS = ["cheap", "balanced", "premium"] as const;
+
 function AddCustomForm({ onDone }: { onDone: () => void }) {
   const [label, setLabel] = useState("");
   const [id, setId] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState("");
+  const [tiers, setTiers] = useState<{ cheap?: string; balanced?: string; premium?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const modelList = models.split(",").map((m) => m.trim()).filter(Boolean);
 
   const submit = async () => {
     setError(null);
     setSaving(true);
+    const cleanTiers = Object.fromEntries(
+      Object.entries(tiers).filter(([, v]) => v && modelList.includes(v)),
+    );
     const err = await addCustomProvider({
       id: id.trim() || label.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
       label: label.trim() || id.trim(),
       base_url: baseUrl.trim(),
       api_key: apiKey.trim(),
-      models: models.split(",").map((m) => m.trim()).filter(Boolean),
+      models: modelList,
+      ...(Object.keys(cleanTiers).length ? { tiers: cleanTiers } : {}),
     });
     setSaving(false);
     if (err) {
@@ -307,6 +316,36 @@ function AddCustomForm({ onDone }: { onDone: () => void }) {
         value={models}
         onChange={(e) => setModels(e.target.value)}
       />
+
+      {modelList.length > 0 ? (
+        <div className="rounded border border-[var(--color-border)] p-2">
+          <p className="mb-1 text-xs text-[var(--color-text-muted)]">
+            Optional — assign a model to a tier so <span className="code">compass/auto</span> can
+            route here automatically:
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {TIER_KEYS.map((tier) => (
+              <label key={tier} className="flex flex-col gap-1 text-xs capitalize">
+                {tier}
+                <select
+                  className="select select-bordered select-xs"
+                  value={tiers[tier] ?? ""}
+                  aria-label={`${tier} tier model`}
+                  onChange={(e) => setTiers((t) => ({ ...t, [tier]: e.target.value || undefined }))}
+                >
+                  <option value="">—</option>
+                  {modelList.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {error ? <p className="text-xs text-error">{error}</p> : null}
       <div className="flex justify-end gap-2">
         <button type="button" className="btn btn-ghost btn-sm" onClick={onDone}>

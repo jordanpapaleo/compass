@@ -91,6 +91,8 @@ export interface RoutingDecision {
   estimated_input_tokens: number;
   /** Temperature chosen by the preference engine (only when client sent none). */
   temperature?: number;
+  /** Fallback providers/models to try (in order) if the chosen one errors. */
+  alternates?: Array<{ provider: string; model: string }>;
 }
 
 // ── Provider adapter contract ──────────────────────────────────────

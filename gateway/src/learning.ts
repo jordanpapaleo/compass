@@ -32,6 +32,8 @@ export interface Insight {
 
 const MIN_FAIL_ATTEMPTS = 3;
 const FAIL_RATE_THRESHOLD = 0.8;
+/** Only the most recent N requests per provider count toward the fail warning. */
+const RECENT_FAIL_WINDOW = 12;
 const MIN_PATTERN_COUNT = 3;
 const MIN_LATENCY_SAMPLES = 3;
 const MIN_SAVINGS_PCT = 30;
@@ -43,9 +45,12 @@ export function analyze(
   const insights: Insight[] = [];
   const window = entries.length;
 
-  // ── 1. Providers that keep failing ────────────────────────────────
+  // ── 1. Providers that keep failing (RECENT window, so it self-clears) ──
+  // Entries are newest-first; only the last few per provider count, so a
+  // provider that has recovered stops being flagged as new requests succeed.
   const byProvider = groupBy(entries, (e) => e.provider);
-  for (const [provider, es] of byProvider) {
+  for (const [provider, all] of byProvider) {
+    const es = all.slice(0, RECENT_FAIL_WINDOW);
     if (es.length < MIN_FAIL_ATTEMPTS) continue;
     const errors = es.filter((e) => e.status === "error");
     const rate = errors.length / es.length;

@@ -43,11 +43,18 @@ export const INTENT_TIER: Record<Intent, Tier> = {
 /** Inputs above this size get bumped one tier up from `cheap`. */
 const SIZE_ESCALATION_TOKENS = 12_000;
 
+interface Candidate {
+  provider: string;
+  model: string;
+}
+
 export interface RouterEnv {
   /** Names of configured providers (built-in names or custom ids). */
   availableProviders: string[];
   /** Ids of user-added custom providers, for passthrough matching. */
   customProviderIds?: string[];
+  /** Custom providers assigned to a tier, for auto-routing + failover. */
+  customTiers?: Array<{ provider: string; tier: Tier; model: string }>;
 }
 
 export interface RouterContext {
@@ -209,18 +216,34 @@ export function route(
     }
   }
 
-  // ── Provider selection by availability ───────────────────────────
-  let order = [...TIER_PROVIDER_ORDER[tier]];
+  // ── Candidate list ───────────────────────────────────────────────
+  // Custom providers assigned to this tier come first (an explicit choice to
+  // use them), then the built-ins. Each candidate carries its concrete model.
+  const customForTier = (env.customTiers ?? [])
+    .filter((c) => c.tier === tier)
+    .map((c) => ({ provider: c.provider, model: c.model }));
+  let candidates: Candidate[] = [
+    ...customForTier,
+    ...TIER_PROVIDER_ORDER[tier].map((p) => ({ provider: p as string, model: TIER_MODELS[p][tier] })),
+  ];
+  if (customForTier.length) {
+    reason.push(
+      `Custom provider(s) for tier "${tier}": ${customForTier.map((c) => `${c.provider}/${c.model}`).join(", ")}`,
+    );
+  }
 
   if (prefs) {
     // Cloud ↔ Local reshapes the candidate order.
     if (prefs.cloud_local >= STRONG_RIGHT && env.availableProviders.includes("ollama")) {
-      order = ["ollama", ...order.filter((p) => p !== "ollama")];
+      candidates = [
+        ...candidates.filter((c) => c.provider === "ollama"),
+        ...candidates.filter((c) => c.provider !== "ollama"),
+      ];
       reason.push(`Preference: local over cloud (${prefs.cloud_local}) — Ollama promoted to first choice`);
     } else if (prefs.cloud_local <= STRONG_LEFT) {
-      const withoutLocal = order.filter((p) => p !== "ollama");
-      if (withoutLocal.some((p) => env.availableProviders.includes(p))) {
-        order = withoutLocal;
+      const withoutLocal = candidates.filter((c) => c.provider !== "ollama");
+      if (withoutLocal.some((c) => env.availableProviders.includes(c.provider))) {
+        candidates = withoutLocal;
         reason.push(`Preference: cloud over local (${prefs.cloud_local}) — local excluded from auto-routing`);
       }
     }
@@ -228,34 +251,42 @@ export function route(
     // Strong speed preference: reorder by observed latency when we have data.
     if (prefs.speed_accuracy <= STRONG_LEFT && ctx.avgLatencyMs) {
       const lat = ctx.avgLatencyMs;
-      const known = order.filter((p) => lat[p] !== undefined && env.availableProviders.includes(p));
+      const known = candidates.filter(
+        (c) => lat[c.provider] !== undefined && env.availableProviders.includes(c.provider),
+      );
       if (known.length >= 2) {
-        known.sort((a, b) => (lat[a] ?? Infinity) - (lat[b] ?? Infinity));
-        order = [...known, ...order.filter((p) => !known.includes(p))];
+        known.sort((a, b) => (lat[a.provider] ?? Infinity) - (lat[b.provider] ?? Infinity));
+        const knownSet = new Set(known);
+        candidates = [...known, ...candidates.filter((c) => !knownSet.has(c))];
         reason.push(
           `Speed preference: providers reordered by observed latency (${known
-            .map((p) => `${p} ${Math.round(lat[p]!)}ms`)
+            .map((c) => `${c.provider} ${Math.round(lat[c.provider] ?? 0)}ms`)
             .join(", ")})`,
         );
       }
     }
   }
 
-  const provider = order.find((p) => env.availableProviders.includes(p)) ?? order[0]!;
-  reason.push(availabilityNote(provider, env));
-
-  const model = TIER_MODELS[provider][tier];
-  reason.push(`Provider "${provider}" tier "${tier}" → ${model}`);
+  // Available candidates, in order. First is the pick; the rest are failover.
+  const available = candidates.filter((c) => env.availableProviders.includes(c.provider));
+  const chosen = available[0] ?? candidates[0]!;
+  const alternates = available.slice(1);
+  reason.push(availabilityNote(chosen.provider, env));
+  reason.push(`Provider "${chosen.provider}" tier "${tier}" → ${chosen.model}`);
+  if (alternates.length) {
+    reason.push(`Failover order: ${alternates.map((a) => `${a.provider}/${a.model}`).join(" → ")}`);
+  }
 
   return {
     intent,
     intent_source: intentSource,
-    provider,
-    model,
+    provider: chosen.provider,
+    model: chosen.model,
     rule: `intent-tier:${intent}→${tier}`,
     reason,
     estimated_input_tokens: estTokens,
     ...(temperature !== undefined ? { temperature } : {}),
+    ...(alternates.length ? { alternates } : {}),
   };
 }
 
