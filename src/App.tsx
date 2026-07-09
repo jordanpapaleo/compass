@@ -2,6 +2,7 @@ import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { Personalization } from "./components/Personalization";
 import { RoutingLog } from "./components/RoutingLog";
+import { Suggestions } from "./components/Suggestions";
 import { GATEWAY_URL, fetchHealth, type Health } from "./lib/gateway";
 
 type GatewayState =
@@ -50,6 +51,7 @@ export default function App() {
       <main className="flex flex-1 flex-col gap-4 overflow-y-auto p-6">
         <GatewayCard state={gateway} />
         <Personalization />
+        <Suggestions />
         <RoutingLog />
       </main>
     </div>

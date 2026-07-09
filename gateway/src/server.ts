@@ -19,12 +19,15 @@ import { geminiAdapter } from "./providers/gemini.ts";
 import { ollamaAdapter } from "./providers/ollama.ts";
 import { openaiAdapter } from "./providers/openai.ts";
 import { zaiAdapter } from "./providers/zai.ts";
+import { analyze } from "./learning.ts";
+import { getOverrides, removeOverride, setOverride, type IntentOverride } from "./overrides.ts";
 import { getPreferences, sanitize, setPreferences, type Preferences } from "./preferences.ts";
 import { resolveMaxTokens, route } from "./router.ts";
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
   CompletionResult,
+  Intent,
   ProviderAdapter,
   ProviderName,
   RoutingDecision,
@@ -132,11 +135,15 @@ export function createApp(): Hono {
     const parsed = validate(await c.req.json().catch(() => null));
     if (!parsed.ok) return c.json({ error: { message: parsed.error } }, 400);
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const [prefs, avgLatencyMs] = await Promise.all([getPreferences(), avgLatencyByProvider()]);
+    const [prefs, avgLatencyMs, overrides] = await Promise.all([
+      getPreferences(),
+      avgLatencyByProvider(),
+      getOverrides(),
+    ]);
     const decision = route(
       parsed.req,
       { availableProviders: availableProviders() },
-      { git, prefs, avgLatencyMs },
+      { git, prefs, avgLatencyMs, overrides },
     );
     return c.json({ decision, git, preferences: prefs });
   });
@@ -156,6 +163,32 @@ export function createApp(): Hono {
     return c.json({ preferences: saved });
   });
 
+  // Learning loop: suggestions computed live from real routing history.
+  app.get("/v1/insights", async (c) => {
+    const [entries, overrides] = await Promise.all([readLog(200), getOverrides()]);
+    return c.json({ insights: analyze(entries, overrides), overrides });
+  });
+
+  app.get("/v1/overrides", async (c) => c.json({ overrides: await getOverrides() }));
+
+  app.post("/v1/overrides", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as
+      | ({ intent: Intent } & Omit<IntentOverride, "applied_at">)
+      | null;
+    if (!body?.intent || !body.provider || !body.model)
+      return c.json({ error: { message: "intent, provider, model required" } }, 400);
+    const overrides = await setOverride(body.intent, {
+      provider: body.provider,
+      model: body.model,
+      source: body.source ?? "learned",
+    });
+    return c.json({ overrides });
+  });
+
+  app.delete("/v1/overrides/:intent", async (c) =>
+    c.json({ overrides: await removeOverride(c.req.param("intent") as Intent) }),
+  );
+
   app.post("/v1/chat/completions", async (c) => {
     const parsed = validate(await c.req.json().catch(() => null));
     if (!parsed.ok) return c.json({ error: { message: parsed.error, type: "invalid_request_error" } }, 400);
@@ -163,11 +196,15 @@ export function createApp(): Hono {
 
     const id = `cmpl-${ulid()}`;
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const [prefs, avgLatencyMs] = await Promise.all([getPreferences(), avgLatencyByProvider()]);
+    const [prefs, avgLatencyMs, overrides] = await Promise.all([
+      getPreferences(),
+      avgLatencyByProvider(),
+      getOverrides(),
+    ]);
     const decision = route(
       req,
       { availableProviders: availableProviders() },
-      { git, prefs, avgLatencyMs },
+      { git, prefs, avgLatencyMs, overrides },
     );
     const adapter = ADAPTERS[decision.provider];
     const started = performance.now();
@@ -252,7 +289,13 @@ export function createApp(): Hono {
               });
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
-              send({ error: { message, type: "provider_error" } });
+              // The client may have disconnected — enqueue on a closed stream
+              // throws, and an unlogged request would be a hole in history.
+              try {
+                send({ error: { message, type: "provider_error" } });
+              } catch {
+                /* client gone; still log below */
+              }
               await logRequest(id, decision, {
                 status: "error",
                 error: message,
@@ -262,7 +305,11 @@ export function createApp(): Hono {
                 prefs,
               });
             } finally {
-              controller.close();
+              try {
+                controller.close();
+              } catch {
+                /* already closed by cancellation */
+              }
             }
           },
         }),

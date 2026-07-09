@@ -40,6 +40,8 @@ export function RoutingLog() {
           ) : null}
         </h2>
 
+        {entries !== null && entries.length > 0 ? <UsageStats entries={entries} /> : null}
+
         {entries === null ? (
           <p className="text-sm text-[var(--color-text-muted)]">Gateway offline — no log.</p>
         ) : entries.length === 0 ? (
@@ -74,6 +76,35 @@ export function RoutingLog() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function UsageStats({ entries }: { entries: RoutingLogEntry[] }) {
+  const ok = entries.filter((e) => e.status === "ok");
+  const cost = entries.reduce((a, e) => a + (e.cost_usd ?? 0), 0);
+  const avgLatency = ok.length
+    ? Math.round(ok.reduce((a, e) => a + e.latency_ms, 0) / ok.length)
+    : null;
+  return (
+    <div className="flex flex-wrap gap-x-8 gap-y-1 text-sm text-[var(--color-text-muted)]">
+      <span>
+        <span className="font-semibold text-base-content">{entries.length}</span> requests
+      </span>
+      <span>
+        <span className="font-semibold text-base-content">
+          {Math.round((ok.length / entries.length) * 100)}%
+        </span>{" "}
+        ok
+      </span>
+      <span>
+        <span className="font-semibold text-base-content">${cost.toFixed(4)}</span> spent
+      </span>
+      {avgLatency !== null ? (
+        <span>
+          <span className="font-semibold text-base-content">{avgLatency} ms</span> avg (ok)
+        </span>
+      ) : null}
     </div>
   );
 }

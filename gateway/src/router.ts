@@ -18,6 +18,7 @@
 import { DEFAULT_MAX_TOKENS, TIER_MODELS, TIER_PROVIDER_ORDER, estimateTokens, type Tier } from "./config.ts";
 import type { GitContext } from "./context/git.ts";
 import { detectIntent, isIntent } from "./intent.ts";
+import type { Overrides } from "./overrides.ts";
 import { STRONG_LEFT, STRONG_RIGHT, type Preferences } from "./preferences.ts";
 import type { ChatCompletionRequest, Intent, ProviderName, RoutingDecision } from "./types.ts";
 
@@ -55,6 +56,8 @@ export interface RouterContext {
    * Used only under a strong speed preference.
    */
   avgLatencyMs?: Partial<Record<ProviderName, number>>;
+  /** Applied learning-loop overrides: intent → pinned provider/model. */
+  overrides?: Overrides | null;
 }
 
 /** Working diffs above this size escalate VCS-related intents one tier. */
@@ -75,10 +78,14 @@ export function route(
   // ── Rule 1: concrete model passthrough ───────────────────────────
   const passthrough = matchPassthrough(req.model);
   if (passthrough) {
+    // Intent is still detected (not used for routing) so the learning loop
+    // can see "user manually picks model M for intent X" patterns.
+    const detected = detectIntent(req.messages);
     reason.push(`Client requested concrete model "${req.model}" — passthrough`);
+    if (detected.score > 0) reason.push(`(request looks like "${detected.intent}" — recorded for learning)`);
     reason.push(availabilityNote(passthrough.provider, env));
     return {
-      intent: "chat",
+      intent: detected.intent,
       intent_source: "passthrough",
       provider: passthrough.provider,
       model: passthrough.model,
@@ -105,6 +112,28 @@ export function route(
       detected.score > 0
         ? `Intent detected as "${intent}" (signal score ${detected.score})`
         : `No intent signals matched — defaulting to "chat"`,
+    );
+  }
+
+  // ── Learned overrides: applied suggestions short-circuit tiers ───
+  const override = ctx.overrides?.[intent];
+  if (override) {
+    if (env.availableProviders.includes(override.provider)) {
+      reason.push(
+        `Learned override: "${intent}" pinned to ${override.provider}/${override.model} (applied ${override.applied_at.slice(0, 10)})`,
+      );
+      return {
+        intent,
+        intent_source: intentSource,
+        provider: override.provider,
+        model: override.model,
+        rule: `learned-override:${intent}`,
+        reason,
+        estimated_input_tokens: estTokens,
+      };
+    }
+    reason.push(
+      `Learned override for "${intent}" targets ${override.provider} which is not configured — falling back to rules`,
     );
   }
 

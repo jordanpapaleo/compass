@@ -170,3 +170,37 @@ gpt-5.4-mini ("tier −1, balanced→cheap"). Day 3 gate passed.
 Preview effect keyed on client prefs fired before the debounced PUT landed —
 but /v1/route reads prefs server-side, so it flashed stale decisions. Moved
 slider-driven refresh into the save handler (effect only on sample change).
+
+## Day 4 — Learning & Polish
+
+### Learning engine: four insight kinds, computed live from real history
+`gateway/src/learning.ts` analyzes the last 200 log entries on every
+GET /v1/insights — nothing precomputed, nothing synthetic:
+- provider-failing: ≥3 attempts, ≥80% errors → warning (fired on openai's
+  real 429 streak).
+- explicit-model-pattern: ≥3 dominant (≥70%) manual model picks for one
+  intent → applyable suggestion (the spec's "always prefers Haiku" case).
+- cost-optimization: ≥30% projected savings re-pricing real token counts on
+  the cheapest known-priced cheap-tier model → applyable.
+- latency-gap: ≥2x avg gap between providers (≥3 samples each) → info.
+
+### Overrides: the apply loop
+Suggestion → POST /v1/overrides → ~/.compass/overrides.json → router applies
+right after intent resolution (rule "learned-override:<intent>", explained,
+never on passthrough, falls back to rules if the pinned provider is
+unconfigured). UI lists active learned routes with one-click removal.
+
+### Passthrough now detects intent (for learning only)
+Explicit-model requests still route verbatim, but the detected intent is
+recorded so "user manually picks M for X" is observable. That's what let the
+pattern fire on real usage.
+
+### Bug found via the demo itself: client disconnect lost the log entry
+A curl | head cut an SSE stream early → enqueue threw → the catch's error
+send ALSO threw → logRequest never ran. Fixed: guarded send + close, log
+always written. Failed/aborted streams are history too.
+
+### Day 4 gate: PASSED on real history
+Observed (3 genuine manual ollama picks + real openai 429s) → suggested →
+applied via UI click → compass/auto request routed by learned-override:chat
+and completed locally. Loop closed end-to-end.
