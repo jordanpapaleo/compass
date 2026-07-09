@@ -13,12 +13,13 @@ import { cors } from "hono/cors";
 import { ulid } from "ulid";
 import { costUSD } from "./config.ts";
 import { getGitContext, type GitContext } from "./context/git.ts";
-import { appendLog, readLog } from "./log.ts";
+import { appendLog, avgLatencyByProvider, readLog } from "./log.ts";
 import { anthropicAdapter } from "./providers/anthropic.ts";
 import { geminiAdapter } from "./providers/gemini.ts";
 import { ollamaAdapter } from "./providers/ollama.ts";
 import { openaiAdapter } from "./providers/openai.ts";
 import { zaiAdapter } from "./providers/zai.ts";
+import { getPreferences, sanitize, setPreferences, type Preferences } from "./preferences.ts";
 import { resolveMaxTokens, route } from "./router.ts";
 import type {
   ChatCompletionRequest,
@@ -65,12 +66,14 @@ async function logRequest(
     result?: CompletionResult;
     stream: boolean;
     git?: GitContext | null;
+    prefs?: Preferences;
   },
 ): Promise<void> {
   const entry: RoutingLogEntry = {
     id,
     ts: new Date().toISOString(),
     ...(opts.git ? { git: opts.git } : {}),
+    ...(opts.prefs ? { prefs: { ...opts.prefs } } : {}),
     intent: decision.intent,
     intent_source: decision.intent_source,
     provider: decision.provider,
@@ -129,13 +132,28 @@ export function createApp(): Hono {
     const parsed = validate(await c.req.json().catch(() => null));
     if (!parsed.ok) return c.json({ error: { message: parsed.error } }, 400);
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const decision = route(parsed.req, { availableProviders: availableProviders() }, { git });
-    return c.json({ decision, git });
+    const [prefs, avgLatencyMs] = await Promise.all([getPreferences(), avgLatencyByProvider()]);
+    const decision = route(
+      parsed.req,
+      { availableProviders: availableProviders() },
+      { git, prefs, avgLatencyMs },
+    );
+    return c.json({ decision, git, preferences: prefs });
   });
 
   app.get("/v1/routing-log", async (c) => {
     const limit = Number(c.req.query("limit") ?? "") || 100;
     return c.json({ entries: await readLog(limit) });
+  });
+
+  app.get("/v1/preferences", async (c) => c.json({ preferences: await getPreferences() }));
+
+  app.put("/v1/preferences", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Partial<Preferences> | null;
+    if (!body || typeof body !== "object")
+      return c.json({ error: { message: "body must be a JSON object of slider values" } }, 400);
+    const saved = await setPreferences(sanitize({ ...(await getPreferences()), ...body }));
+    return c.json({ preferences: saved });
   });
 
   app.post("/v1/chat/completions", async (c) => {
@@ -145,7 +163,12 @@ export function createApp(): Hono {
 
     const id = `cmpl-${ulid()}`;
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const decision = route(req, { availableProviders: availableProviders() }, { git });
+    const [prefs, avgLatencyMs] = await Promise.all([getPreferences(), avgLatencyByProvider()]);
+    const decision = route(
+      req,
+      { availableProviders: availableProviders() },
+      { git, prefs, avgLatencyMs },
+    );
     const adapter = ADAPTERS[decision.provider];
     const started = performance.now();
 
@@ -157,6 +180,7 @@ export function createApp(): Hono {
         latencyMs: Math.round(performance.now() - started),
         stream: Boolean(req.stream),
         git,
+        prefs,
       });
       return c.json(
         { error: { message: error, type: "compass_provider_unavailable", compass: decision } },
@@ -168,7 +192,12 @@ export function createApp(): Hono {
       model: decision.model,
       messages: req.messages,
       maxTokens: resolveMaxTokens(req),
-      ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+      // Client temperature wins; otherwise the preference engine's choice.
+      ...(req.temperature !== undefined
+        ? { temperature: req.temperature }
+        : decision.temperature !== undefined
+          ? { temperature: decision.temperature }
+          : {}),
     };
 
     // ── Streaming (SSE, OpenAI chunk framing) ────────────────────
@@ -219,6 +248,7 @@ export function createApp(): Hono {
                 ...(result ? { result } : {}),
                 stream: true,
                 git,
+                prefs,
               });
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
@@ -229,6 +259,7 @@ export function createApp(): Hono {
                 latencyMs: Math.round(performance.now() - started),
                 stream: true,
                 git,
+                prefs,
               });
             } finally {
               controller.close();
@@ -248,7 +279,7 @@ export function createApp(): Hono {
     try {
       const result = await adapter.complete(params);
       const latencyMs = Math.round(performance.now() - started);
-      await logRequest(id, decision, { status: "ok", latencyMs, result, stream: false, git });
+      await logRequest(id, decision, { status: "ok", latencyMs, result, stream: false, git, prefs });
 
       const response: ChatCompletionResponse = {
         id,
@@ -282,6 +313,7 @@ export function createApp(): Hono {
         latencyMs: Math.round(performance.now() - started),
         stream: false,
         git,
+        prefs,
       });
       return c.json({ error: { message, type: "provider_error", compass: decision } }, 502);
     }

@@ -18,7 +18,10 @@
 import { DEFAULT_MAX_TOKENS, TIER_MODELS, TIER_PROVIDER_ORDER, estimateTokens, type Tier } from "./config.ts";
 import type { GitContext } from "./context/git.ts";
 import { detectIntent, isIntent } from "./intent.ts";
+import { STRONG_LEFT, STRONG_RIGHT, type Preferences } from "./preferences.ts";
 import type { ChatCompletionRequest, Intent, ProviderName, RoutingDecision } from "./types.ts";
+
+const TIERS: Tier[] = ["cheap", "balanced", "premium"];
 
 /** Intent → tier. The heart of "route by outcome, not by model". */
 export const INTENT_TIER: Record<Intent, Tier> = {
@@ -45,6 +48,13 @@ export interface RouterEnv {
 
 export interface RouterContext {
   git?: GitContext | null;
+  /** User preference sliders — omitted/neutral values leave rules unchanged. */
+  prefs?: Preferences | null;
+  /**
+   * Observed average latency per provider (ms), mined from the routing log.
+   * Used only under a strong speed preference.
+   */
+  avgLatencyMs?: Partial<Record<ProviderName, number>>;
 }
 
 /** Working diffs above this size escalate VCS-related intents one tier. */
@@ -126,8 +136,79 @@ export function route(
     }
   }
 
+  // ── Preferences (Day 3): sliders bias tier and provider order ────
+  const prefs = ctx.prefs;
+  let temperature: number | undefined;
+
+  if (prefs) {
+    // Quality ↔ Cost and Speed ↔ Accuracy shift the tier, clamped.
+    let bias = 0;
+    if (prefs.quality_cost <= STRONG_LEFT) {
+      bias += 1;
+      reason.push(`Preference: quality over cost (${prefs.quality_cost}) — tier +1`);
+    } else if (prefs.quality_cost >= STRONG_RIGHT) {
+      bias -= 1;
+      reason.push(`Preference: cost over quality (${prefs.quality_cost}) — tier −1`);
+    }
+    if (prefs.speed_accuracy >= STRONG_RIGHT) {
+      bias += 1;
+      reason.push(`Preference: accuracy over speed (${prefs.speed_accuracy}) — tier +1`);
+    } else if (prefs.speed_accuracy <= STRONG_LEFT) {
+      bias -= 1;
+      reason.push(`Preference: speed over accuracy (${prefs.speed_accuracy}) — tier −1`);
+    }
+    if (bias !== 0) {
+      const idx = Math.min(2, Math.max(0, TIERS.indexOf(tier) + bias));
+      const newTier = TIERS[idx]!;
+      if (newTier !== tier) {
+        reason.push(`Tier "${tier}" → "${newTier}" after preference bias`);
+        tier = newTier;
+      } else {
+        reason.push(`Tier stays "${tier}" (bias clamped at range edge)`);
+      }
+    }
+
+    // Deterministic ↔ Creative → temperature where the provider supports it.
+    if (prefs.deterministic_creative !== 50 && req.temperature === undefined) {
+      temperature = Math.round((prefs.deterministic_creative / 100) * 10) / 10;
+      reason.push(
+        `Preference: ${prefs.deterministic_creative < 50 ? "deterministic" : "creative"} (${prefs.deterministic_creative}) — temperature ${temperature} where supported`,
+      );
+    }
+  }
+
   // ── Provider selection by availability ───────────────────────────
-  const order = TIER_PROVIDER_ORDER[tier];
+  let order = [...TIER_PROVIDER_ORDER[tier]];
+
+  if (prefs) {
+    // Cloud ↔ Local reshapes the candidate order.
+    if (prefs.cloud_local >= STRONG_RIGHT && env.availableProviders.includes("ollama")) {
+      order = ["ollama", ...order.filter((p) => p !== "ollama")];
+      reason.push(`Preference: local over cloud (${prefs.cloud_local}) — Ollama promoted to first choice`);
+    } else if (prefs.cloud_local <= STRONG_LEFT) {
+      const withoutLocal = order.filter((p) => p !== "ollama");
+      if (withoutLocal.some((p) => env.availableProviders.includes(p))) {
+        order = withoutLocal;
+        reason.push(`Preference: cloud over local (${prefs.cloud_local}) — local excluded from auto-routing`);
+      }
+    }
+
+    // Strong speed preference: reorder by observed latency when we have data.
+    if (prefs.speed_accuracy <= STRONG_LEFT && ctx.avgLatencyMs) {
+      const lat = ctx.avgLatencyMs;
+      const known = order.filter((p) => lat[p] !== undefined && env.availableProviders.includes(p));
+      if (known.length >= 2) {
+        known.sort((a, b) => (lat[a] ?? Infinity) - (lat[b] ?? Infinity));
+        order = [...known, ...order.filter((p) => !known.includes(p))];
+        reason.push(
+          `Speed preference: providers reordered by observed latency (${known
+            .map((p) => `${p} ${Math.round(lat[p]!)}ms`)
+            .join(", ")})`,
+        );
+      }
+    }
+  }
+
   const provider = order.find((p) => env.availableProviders.includes(p)) ?? order[0]!;
   reason.push(availabilityNote(provider, env));
 
@@ -142,6 +223,7 @@ export function route(
     rule: `intent-tier:${intent}→${tier}`,
     reason,
     estimated_input_tokens: estTokens,
+    ...(temperature !== undefined ? { temperature } : {}),
   };
 }
 

@@ -196,3 +196,89 @@ describe("ollama / local provider", () => {
     expect(costUSD("qwen3:8b", 5000, 1000, "ollama")).toBe(0);
   });
 });
+
+describe("preferences (Day 3)", () => {
+  const neutral = {
+    quality_cost: 50,
+    speed_accuracy: 50,
+    deterministic_creative: 50,
+    cloud_local: 50,
+  };
+  const allProviders = {
+    availableProviders: ["anthropic", "openai", "gemini", "zai", "ollama"] as const,
+  };
+  const envAll = { availableProviders: [...allProviders.availableProviders] };
+
+  it("neutral sliders change nothing", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
+      prefs: { ...neutral },
+    });
+    expect(d.model).toBe("claude-sonnet-5"); // balanced, unchanged
+    expect(d.temperature).toBeUndefined();
+  });
+
+  it("strong cost preference drops a tier: coding balanced → cheap", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
+      prefs: { ...neutral, quality_cost: 90 },
+    });
+    expect(d.model).toBe("claude-haiku-4-5");
+    expect(d.reason.join(" ")).toMatch(/cost over quality/);
+  });
+
+  it("strong quality preference raises a tier: coding balanced → premium", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
+      prefs: { ...neutral, quality_cost: 10 },
+    });
+    expect(d.model).toBe("claude-opus-4-8");
+  });
+
+  it("quality + accuracy both up clamps at premium", () => {
+    const d = route(req("compass/architecture", [user("design the system architecture")]), envAll, {
+      prefs: { ...neutral, quality_cost: 0, speed_accuracy: 100 },
+    });
+    expect(d.model).toBe("claude-opus-4-8");
+    expect(d.reason.join(" ")).toMatch(/clamped/);
+  });
+
+  it("creative slider sets temperature when client sent none", () => {
+    const d = route(req("compass/brainstorming", [user("brainstorm ideas for a logo")]), envAll, {
+      prefs: { ...neutral, deterministic_creative: 90 },
+    });
+    expect(d.temperature).toBeCloseTo(0.9);
+  });
+
+  it("strong local preference promotes ollama over cloud", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
+      prefs: { ...neutral, cloud_local: 95 },
+    });
+    expect(d.provider).toBe("ollama");
+    expect(d.reason.join(" ")).toMatch(/Ollama promoted/);
+  });
+
+  it("strong cloud preference excludes local from auto-routing", () => {
+    const d = route(req("compass/chat", [user("hey")]), {
+      availableProviders: ["ollama", "gemini"],
+    }, {
+      prefs: { ...neutral, cloud_local: 5 },
+    });
+    expect(d.provider).toBe("gemini");
+  });
+
+  it("strong speed preference reorders by observed latency", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
+      prefs: { ...neutral, speed_accuracy: 10 },
+      avgLatencyMs: { anthropic: 4000, zai: 900, openai: 2500 },
+    });
+    // speed also drops tier to cheap; fastest observed provider wins
+    expect(d.provider).toBe("zai");
+    expect(d.reason.join(" ")).toMatch(/reordered by observed latency/);
+  });
+
+  it("passthrough ignores preferences entirely", () => {
+    const d = route(req("claude-opus-4-8", [user("hi")]), envAll, {
+      prefs: { ...neutral, quality_cost: 100, cloud_local: 100 },
+    });
+    expect(d.provider).toBe("anthropic");
+    expect(d.model).toBe("claude-opus-4-8");
+  });
+});

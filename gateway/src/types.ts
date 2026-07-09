@@ -87,6 +87,8 @@ export interface RoutingDecision {
   reason: string[];
   /** Rough input-size estimate used by size-sensitive rules. */
   estimated_input_tokens: number;
+  /** Temperature chosen by the preference engine (only when client sent none). */
+  temperature?: number;
 }
 
 // ── Provider adapter contract ──────────────────────────────────────
@@ -130,6 +132,8 @@ export interface RoutingLogEntry {
   ts: string; // ISO 8601
   /** Repo state at request time, when the client provided a cwd. */
   git?: GitContextSnapshot | null;
+  /** Preference sliders at request time (Day 4 learning-loop input). */
+  prefs?: Record<string, number>;
   intent: Intent;
   intent_source: RoutingDecision["intent_source"];
   provider: ProviderName;

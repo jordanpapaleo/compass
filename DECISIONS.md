@@ -141,3 +141,32 @@ keyless mode (`baseURLEnv` gates availability instead of an API-key env).
 - This delivered the spec's "offline/local-first routing" future feature
   early, and CLOSED THE DAY 1 GATE with zero cloud quota: real completion +
   real streaming through the gateway, logged with tokens/latency/$0 cost.
+
+## Day 3 — Personalization
+
+### Preference model: four 0–100 axes, named by poles
+`quality_cost / speed_accuracy / deterministic_creative / cloud_local`,
+50 = neutral, persisted at `~/.compass/preferences.json`, served via
+GET/PUT /v1/preferences. Bands: ≤24 / ≥76 count as "strong".
+
+### How sliders change routing (all explained in the reason trail)
+- Quality↔Cost and Speed↔Accuracy: ±1 tier bias, clamped to cheap..premium.
+- Speed (strong) additionally reorders providers by OBSERVED avg latency
+  mined from the routing log (≥2 providers with data) — personalization from
+  the user's own history, groundwork for Day 4.
+- Deterministic↔Creative: temperature 0..1.0 where the provider supports it;
+  client-sent temperature always wins; Anthropic current-gen never gets one.
+- Cloud↔Local: strong local promotes ollama to first choice; strong cloud
+  excludes local from auto-routing (unless it's the only provider).
+- Passthrough (explicit model id) bypasses preferences by design.
+- Every log entry snapshots the prefs — Day 4 learning-loop input.
+
+### Verified live (browser, real drags)
+Same "Implement code" request: neutral → openai/gpt-5.4; Cloud↔Local at 100
+→ ollama/qwen3:8b ("Ollama promoted to first choice"); Quality↔Cost at 90 →
+gpt-5.4-mini ("tier −1, balanced→cheap"). Day 3 gate passed.
+
+### React review caught a real bug
+Preview effect keyed on client prefs fired before the debounced PUT landed —
+but /v1/route reads prefs server-side, so it flashed stale decisions. Moved
+slider-driven refresh into the save handler (effect only on sample change).

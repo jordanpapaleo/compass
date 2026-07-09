@@ -49,3 +49,24 @@ export async function readLog(limit = 100): Promise<RoutingLogEntry[]> {
 export function logPath(): string {
   return LOG_PATH;
 }
+
+/**
+ * Observed average latency per provider over recent successful requests.
+ * Feeds the speed preference — routing on YOUR history, not marketing claims.
+ */
+export async function avgLatencyByProvider(
+  sample = 200,
+): Promise<Partial<Record<string, number>>> {
+  const entries = await readLog(sample);
+  const sums = new Map<string, { total: number; n: number }>();
+  for (const e of entries) {
+    if (e.status !== "ok") continue;
+    const s = sums.get(e.provider) ?? { total: 0, n: 0 };
+    s.total += e.latency_ms;
+    s.n += 1;
+    sums.set(e.provider, s);
+  }
+  const out: Partial<Record<string, number>> = {};
+  for (const [provider, { total, n }] of sums) out[provider] = total / n;
+  return out;
+}
