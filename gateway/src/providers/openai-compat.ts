@@ -8,15 +8,17 @@
  */
 
 import OpenAI from "openai";
-import type { CompletionParams, CompletionResult, ProviderAdapter, ProviderName } from "../types.ts";
+import type { CompletionParams, CompletionResult, ProviderAdapter } from "../types.ts";
 
 export interface OpenAICompatConfig {
-  name: ProviderName;
+  name: string;
   /**
    * Env var holding the API key — its presence gates availability.
    * For keyless local runtimes, use `baseURLEnv` instead.
    */
   apiKeyEnv?: string;
+  /** Literal API key (custom providers, whose keys live in config not env). */
+  apiKey?: string;
   /** Omit for api.openai.com. */
   baseURL?: string;
   /**
@@ -32,10 +34,13 @@ export function createOpenAICompatAdapter(cfg: OpenAICompatConfig): ProviderAdap
   const baseURL = (): string | undefined =>
     cfg.baseURLEnv ? process.env[cfg.baseURLEnv] : cfg.baseURL;
 
+  const apiKey = (): string | undefined =>
+    cfg.apiKey ?? (cfg.apiKeyEnv ? process.env[cfg.apiKeyEnv] : undefined);
+
   const getClient = (): OpenAI => {
     client ??= new OpenAI({
       // Local runtimes ignore auth but the SDK requires a non-empty key.
-      apiKey: cfg.apiKeyEnv ? process.env[cfg.apiKeyEnv] : "local",
+      apiKey: apiKey() ?? "local",
       ...(baseURL() ? { baseURL: baseURL() } : {}),
     });
     return client;
@@ -45,6 +50,7 @@ export function createOpenAICompatAdapter(cfg: OpenAICompatConfig): ProviderAdap
     name: cfg.name,
 
     available() {
+      if (cfg.apiKey) return true;
       if (cfg.apiKeyEnv) return Boolean(process.env[cfg.apiKeyEnv]);
       if (cfg.baseURLEnv) return Boolean(process.env[cfg.baseURLEnv]);
       return false;

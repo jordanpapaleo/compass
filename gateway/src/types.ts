@@ -71,14 +71,16 @@ export type Intent =
   | "search"
   | "chat";
 
-export type ProviderName = "anthropic" | "openai" | "gemini" | "zai" | "ollama";
+/** Built-in providers with dedicated adapters. Custom providers are strings. */
+export type ProviderName = "anthropic" | "openai" | "gemini" | "ollama";
 
 export interface RoutingDecision {
   /** Detected or explicitly requested intent. */
   intent: Intent;
   /** How the intent was determined. */
   intent_source: "explicit" | "detected" | "passthrough";
-  provider: ProviderName;
+  /** Built-in provider name or a custom provider id. */
+  provider: string;
   /** Concrete provider model id the request is executed against. */
   model: string;
   /** The rule that fired, machine-readable. */
@@ -109,7 +111,8 @@ export interface CompletionResult {
 }
 
 export interface ProviderAdapter {
-  name: ProviderName;
+  /** Built-in provider name or a custom provider id. */
+  name: string;
   /** True when the API key for this provider is configured. */
   available(): boolean;
   complete(params: CompletionParams): Promise<CompletionResult>;
@@ -138,7 +141,8 @@ export interface RoutingLogEntry {
   prefs?: Record<string, number>;
   intent: Intent;
   intent_source: RoutingDecision["intent_source"];
-  provider: ProviderName;
+  /** Built-in provider name or custom provider id. */
+  provider: string;
   model: string;
   rule: string;
   reason: string[];

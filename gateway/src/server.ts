@@ -14,38 +14,35 @@ import { ulid } from "ulid";
 import { costUSD } from "./config.ts";
 import { getGitContext, type GitContext } from "./context/git.ts";
 import { appendLog, avgLatencyByProvider, readLog } from "./log.ts";
-import { anthropicAdapter } from "./providers/anthropic.ts";
-import { geminiAdapter } from "./providers/gemini.ts";
-import { ollamaAdapter } from "./providers/ollama.ts";
-import { openaiAdapter } from "./providers/openai.ts";
-import { zaiAdapter } from "./providers/zai.ts";
 import { analyze } from "./learning.ts";
 import { getOverrides, removeOverride, setOverride, type IntentOverride } from "./overrides.ts";
 import { getPreferences, sanitize, setPreferences, type Preferences } from "./preferences.ts";
-import { clearKey, setKey } from "./providerConfig.ts";
+import {
+  addCustomProvider,
+  clearKey,
+  type CustomProvider,
+  removeCustomProvider,
+  setKey,
+} from "./providerConfig.ts";
+import {
+  availableProviderNames,
+  customProviderIds,
+  customProviders,
+  getAdapter,
+  isBuiltin,
+  providerList,
+  rebuildCustomAdapters,
+} from "./registry.ts";
 import { resolveMaxTokens, route } from "./router.ts";
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
   CompletionResult,
   Intent,
-  ProviderAdapter,
   ProviderName,
   RoutingDecision,
   RoutingLogEntry,
 } from "./types.ts";
-
-const ADAPTERS: Record<ProviderName, ProviderAdapter> = {
-  anthropic: anthropicAdapter,
-  openai: openaiAdapter,
-  gemini: geminiAdapter,
-  zai: zaiAdapter,
-  ollama: ollamaAdapter,
-};
-
-function availableProviders(): ProviderName[] {
-  return (Object.keys(ADAPTERS) as ProviderName[]).filter((p) => ADAPTERS[p].available());
-}
 
 function validate(body: unknown): { ok: true; req: ChatCompletionRequest } | { ok: false; error: string } {
   const b = body as Partial<ChatCompletionRequest> | null;
@@ -124,42 +121,71 @@ export function createApp(): Hono {
     c.json({
       status: "ok",
       service: "compass-gateway",
-      providers: (Object.keys(ADAPTERS) as ProviderName[]).map((p) => ({
-        name: p,
-        key_configured: ADAPTERS[p].available(),
-      })),
+      providers: providerList().map((p) => ({ name: p.name, key_configured: p.configured })),
     }),
   );
 
-  // Provider key management — set/clear from the app instead of a .env file.
-  app.get("/v1/providers", (c) =>
-    c.json({
-      providers: (Object.keys(ADAPTERS) as ProviderName[]).map((p) => ({
-        name: p,
-        configured: ADAPTERS[p].available(),
-        // ollama takes a base URL, the rest take an API key.
-        field: p === "ollama" ? "base_url" : "api_key",
-      })),
-    }),
-  );
+  // Provider list — built-ins + custom, for the Providers UI.
+  app.get("/v1/providers", (c) => c.json({ providers: providerList() }));
 
+  // Built-in provider key management (set/clear from the app, not a .env file).
   app.put("/v1/providers/:name", async (c) => {
-    const name = c.req.param("name") as ProviderName;
-    if (!(name in ADAPTERS)) return c.json({ error: { message: `unknown provider "${name}"` } }, 404);
+    const name = c.req.param("name");
+    if (!isBuiltin(name))
+      return c.json({ error: { message: `"${name}" is not a built-in provider` } }, 404);
     const body = (await c.req.json().catch(() => null)) as { value?: string } | null;
     if (!body || typeof body.value !== "string" || !body.value.trim())
       return c.json({ error: { message: "body needs a non-empty `value`" } }, 400);
-    await setKey(name, body.value.trim());
-    ADAPTERS[name].reset?.(); // drop any cached client so the new key is used
-    return c.json({ name, configured: ADAPTERS[name].available() });
+    await setKey(name as ProviderName, body.value.trim());
+    getAdapter(name)?.reset?.(); // drop cached client so the new key is used
+    return c.json({ name, configured: getAdapter(name)?.available() ?? false });
   });
 
   app.delete("/v1/providers/:name", async (c) => {
-    const name = c.req.param("name") as ProviderName;
-    if (!(name in ADAPTERS)) return c.json({ error: { message: `unknown provider "${name}"` } }, 404);
-    await clearKey(name);
-    ADAPTERS[name].reset?.();
-    return c.json({ name, configured: ADAPTERS[name].available() });
+    const name = c.req.param("name");
+    if (!isBuiltin(name))
+      return c.json({ error: { message: `"${name}" is not a built-in provider` } }, 404);
+    await clearKey(name as ProviderName);
+    getAdapter(name)?.reset?.();
+    return c.json({ name, configured: getAdapter(name)?.available() ?? false });
+  });
+
+  // Custom OpenAI-compatible providers — add any provider/model without a release.
+  app.get("/v1/custom-providers", (c) =>
+    // Never echo stored keys back — send metadata only.
+    c.json({
+      custom_providers: customProviders().map((p) => ({
+        id: p.id,
+        label: p.label,
+        base_url: p.base_url,
+        models: p.models,
+      })),
+    }),
+  );
+
+  app.post("/v1/custom-providers", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Partial<CustomProvider> | null;
+    if (!body?.id || !body.base_url || !body.api_key || !Array.isArray(body.models))
+      return c.json({ error: { message: "id, base_url, api_key, models[] required" } }, 400);
+    try {
+      await addCustomProvider({
+        id: body.id,
+        label: body.label ?? body.id,
+        base_url: body.base_url,
+        api_key: body.api_key,
+        models: body.models,
+      });
+      await rebuildCustomAdapters();
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: { message: e instanceof Error ? e.message : String(e) } }, 400);
+    }
+  });
+
+  app.delete("/v1/custom-providers/:id", async (c) => {
+    await removeCustomProvider(c.req.param("id"));
+    await rebuildCustomAdapters();
+    return c.json({ ok: true });
   });
 
   // Dry run — full routing decision, no provider call. Works without keys.
@@ -174,7 +200,7 @@ export function createApp(): Hono {
     ]);
     const decision = route(
       parsed.req,
-      { availableProviders: availableProviders() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds() },
       { git, prefs, avgLatencyMs, overrides },
     );
     return c.json({ decision, git, preferences: prefs });
@@ -235,14 +261,14 @@ export function createApp(): Hono {
     ]);
     const decision = route(
       req,
-      { availableProviders: availableProviders() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds() },
       { git, prefs, avgLatencyMs, overrides },
     );
-    const adapter = ADAPTERS[decision.provider];
+    const adapter = getAdapter(decision.provider);
     const started = performance.now();
 
-    if (!adapter.available()) {
-      const error = `Provider "${decision.provider}" selected but no API key is configured`;
+    if (!adapter || !adapter.available()) {
+      const error = `Provider "${decision.provider}" selected but not configured`;
       await logRequest(id, decision, {
         status: "error",
         error,

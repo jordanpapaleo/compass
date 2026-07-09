@@ -16,18 +16,35 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderName } from "./types.ts";
 
-/** Env var each provider's key/URL lives under (also what adapters read). */
+/** Env var each built-in provider's key/URL lives under (adapters read these). */
 export const PROVIDER_ENV: Record<ProviderName, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   gemini: "GEMINI_API_KEY",
-  zai: "ZAI_API_KEY",
   ollama: "OLLAMA_BASE_URL", // a URL, not a secret
 };
 
+/**
+ * A user-added OpenAI-compatible provider — the "add whatever" path. Covers
+ * Groq, OpenRouter, DeepSeek, Together, Z.ai, local servers, anything that
+ * speaks the OpenAI API. No release needed to add one.
+ */
+export interface CustomProvider {
+  /** url-safe id used in routing, e.g. "groq". */
+  id: string;
+  /** display name, e.g. "Groq". */
+  label: string;
+  base_url: string;
+  api_key: string;
+  /** model ids this provider serves, e.g. ["llama-3.3-70b"]. */
+  models: string[];
+}
+
 export interface ProviderConfig {
-  /** provider name → key (or base URL for ollama). */
+  /** built-in provider name → key (or base URL for ollama). */
   keys: Partial<Record<ProviderName, string>>;
+  /** user-added OpenAI-compatible providers. */
+  custom_providers: CustomProvider[];
 }
 
 const DATA_DIR = process.env.COMPASS_DATA_DIR ?? join(homedir(), ".compass");
@@ -40,8 +57,9 @@ export async function getConfig(): Promise<ProviderConfig> {
   try {
     cache = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as ProviderConfig;
     if (!cache.keys) cache.keys = {};
+    if (!Array.isArray(cache.custom_providers)) cache.custom_providers = [];
   } catch {
-    cache = { keys: {} };
+    cache = { keys: {}, custom_providers: [] };
   }
   return cache;
 }
@@ -84,4 +102,38 @@ export async function clearKey(name: ProviderName): Promise<ProviderConfig> {
   delete process.env[PROVIDER_ENV[name]];
   await persist();
   return cfg;
+}
+
+// ── Custom providers ───────────────────────────────────────────────
+
+export async function getCustomProviders(): Promise<CustomProvider[]> {
+  return (await getConfig()).custom_providers;
+}
+
+const ID_RE = /^[a-z0-9][a-z0-9-]{0,30}$/;
+
+/** Add or replace a custom provider (by id). Returns the updated list. */
+export async function addCustomProvider(cp: CustomProvider): Promise<CustomProvider[]> {
+  const cfg = await getConfig();
+  const clean: CustomProvider = {
+    id: cp.id.trim().toLowerCase(),
+    label: cp.label.trim() || cp.id,
+    base_url: cp.base_url.trim(),
+    api_key: cp.api_key.trim(),
+    models: cp.models.map((m) => m.trim()).filter(Boolean),
+  };
+  if (!ID_RE.test(clean.id)) throw new Error("id must be lowercase letters/digits/hyphens");
+  if (!clean.base_url || !clean.models.length) throw new Error("base_url and at least one model required");
+  cfg.custom_providers = [...cfg.custom_providers.filter((p) => p.id !== clean.id), clean];
+  cache = cfg;
+  await persist();
+  return cfg.custom_providers;
+}
+
+export async function removeCustomProvider(id: string): Promise<CustomProvider[]> {
+  const cfg = await getConfig();
+  cfg.custom_providers = cfg.custom_providers.filter((p) => p.id !== id);
+  cache = cfg;
+  await persist();
+  return cfg.custom_providers;
 }

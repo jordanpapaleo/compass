@@ -1,6 +1,6 @@
 import { Icon } from "@iconify/react";
-import { useRef, useState } from "react";
-import { type ChatMsg, type RoutedInfo, streamChat } from "../lib/gateway";
+import { useEffect, useRef, useState } from "react";
+import { type ChatMsg, fetchProviders, type RoutedInfo, streamChat } from "../lib/gateway";
 
 interface Turn {
   role: "user" | "assistant";
@@ -30,7 +30,23 @@ export function Chat() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [customModes, setCustomModes] = useState<Array<{ value: string; label: string }>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Populate the dropdown with any custom-provider models.
+  useEffect(() => {
+    fetchProviders()
+      .then((ps) =>
+        setCustomModes(
+          ps
+            .filter((p) => p.custom && p.models)
+            .flatMap((p) =>
+              (p.models ?? []).map((m) => ({ value: `${p.name}/${m}`, label: `${p.label}: ${m}` })),
+            ),
+        ),
+      )
+      .catch(() => setCustomModes([]));
+  }, []);
 
   const scrollDown = () => {
     requestAnimationFrame(() => {
@@ -96,7 +112,7 @@ export function Chat() {
             aria-label="Routing mode"
             onChange={(e) => setModel(e.target.value)}
           >
-            {MODES.map((m) => (
+            {[...MODES, ...customModes].map((m) => (
               <option key={m.value} value={m.value}>
                 {m.label}
               </option>

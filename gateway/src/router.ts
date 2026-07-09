@@ -20,7 +20,7 @@ import type { GitContext } from "./context/git.ts";
 import { detectIntent, isIntent } from "./intent.ts";
 import type { Overrides } from "./overrides.ts";
 import { STRONG_LEFT, STRONG_RIGHT, type Preferences } from "./preferences.ts";
-import type { ChatCompletionRequest, Intent, ProviderName, RoutingDecision } from "./types.ts";
+import type { ChatCompletionRequest, Intent, RoutingDecision } from "./types.ts";
 
 const TIERS: Tier[] = ["cheap", "balanced", "premium"];
 
@@ -44,7 +44,10 @@ export const INTENT_TIER: Record<Intent, Tier> = {
 const SIZE_ESCALATION_TOKENS = 12_000;
 
 export interface RouterEnv {
-  availableProviders: ProviderName[];
+  /** Names of configured providers (built-in names or custom ids). */
+  availableProviders: string[];
+  /** Ids of user-added custom providers, for passthrough matching. */
+  customProviderIds?: string[];
 }
 
 export interface RouterContext {
@@ -55,7 +58,7 @@ export interface RouterContext {
    * Observed average latency per provider (ms), mined from the routing log.
    * Used only under a strong speed preference.
    */
-  avgLatencyMs?: Partial<Record<ProviderName, number>>;
+  avgLatencyMs?: Partial<Record<string, number>>;
   /** Applied learning-loop overrides: intent → pinned provider/model. */
   overrides?: Overrides | null;
 }
@@ -76,7 +79,7 @@ export function route(
   const reason: string[] = [];
 
   // ── Rule 1: concrete model passthrough ───────────────────────────
-  const passthrough = matchPassthrough(req.model);
+  const passthrough = matchPassthrough(req.model, env.customProviderIds ?? []);
   if (passthrough) {
     // Intent is still detected (not used for routing) so the learning loop
     // can see "user manually picks model M for intent X" patterns.
@@ -256,18 +259,23 @@ export function route(
   };
 }
 
-function matchPassthrough(model: string): { provider: ProviderName; model: string } | null {
+function matchPassthrough(
+  model: string,
+  customIds: string[],
+): { provider: string; model: string } | null {
   if (/^claude-/i.test(model)) return { provider: "anthropic", model };
   if (/^(gpt-|o[0-9])/i.test(model)) return { provider: "openai", model };
   if (/^gemini-/i.test(model)) return { provider: "gemini", model };
-  if (/^glm-/i.test(model)) return { provider: "zai", model };
-  // ollama/<anything> → local, model name passed through verbatim
-  const local = /^ollama\/(.+)$/i.exec(model);
-  if (local) return { provider: "ollama", model: local[1]! };
+  // "<provider>/<model>" — ollama or any custom provider id
+  const slash = /^([a-z0-9-]+)\/(.+)$/i.exec(model);
+  if (slash) {
+    const id = slash[1]!.toLowerCase();
+    if (id === "ollama" || customIds.includes(id)) return { provider: id, model: slash[2]! };
+  }
   return null;
 }
 
-function availabilityNote(provider: ProviderName, env: RouterEnv): string {
+function availabilityNote(provider: string, env: RouterEnv): string {
   return env.availableProviders.includes(provider)
     ? `Provider "${provider}" is configured and available`
     : `⚠ Provider "${provider}" is NOT configured — execution will fail until it is`;

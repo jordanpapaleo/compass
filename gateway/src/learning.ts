@@ -13,7 +13,8 @@ import type { Intent, ProviderName, RoutingLogEntry } from "./types.ts";
 export interface InsightAction {
   type: "override";
   intent: Intent;
-  provider: ProviderName;
+  /** Built-in provider name or custom provider id. */
+  provider: string;
   model: string;
 }
 

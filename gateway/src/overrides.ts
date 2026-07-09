@@ -10,10 +10,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Intent, ProviderName } from "./types.ts";
+import type { Intent } from "./types.ts";
 
 export interface IntentOverride {
-  provider: ProviderName;
+  /** Built-in provider name or custom provider id. */
+  provider: string;
   model: string;
   source: "learned" | "manual";
   applied_at: string; // ISO 8601

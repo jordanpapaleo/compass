@@ -55,8 +55,11 @@ export async function fetchRoutingLog(limit = 50): Promise<RoutingLogEntry[]> {
 
 export interface ProviderInfo {
   name: string;
+  label: string;
   configured: boolean;
+  custom: boolean;
   field: "api_key" | "base_url";
+  models?: string[];
 }
 
 export async function fetchProviders(): Promise<ProviderInfo[]> {
@@ -75,6 +78,30 @@ export async function setProviderKey(name: string, value: string): Promise<void>
 
 export async function clearProviderKey(name: string): Promise<void> {
   await fetch(`${GATEWAY_URL}/v1/providers/${name}`, { method: "DELETE" });
+}
+
+export interface NewCustomProvider {
+  id: string;
+  label: string;
+  base_url: string;
+  api_key: string;
+  models: string[];
+}
+
+/** Returns an error message on failure, or null on success. */
+export async function addCustomProvider(cp: NewCustomProvider): Promise<string | null> {
+  const res = await fetch(`${GATEWAY_URL}/v1/custom-providers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(cp),
+  });
+  if (res.ok) return null;
+  const body = (await res.json().catch(() => null)) as { error?: { message: string } } | null;
+  return body?.error?.message ?? `error ${res.status}`;
+}
+
+export async function removeCustomProvider(id: string): Promise<void> {
+  await fetch(`${GATEWAY_URL}/v1/custom-providers/${id}`, { method: "DELETE" });
 }
 
 // ── Chat (streaming) ───────────────────────────────────────────────

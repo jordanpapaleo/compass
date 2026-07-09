@@ -32,13 +32,6 @@ export const TIER_MODELS: Record<ProviderName, Record<Tier, string>> = {
     balanced: "gemini-2.0-flash",
     premium: "gemini-2.5-pro",
   },
-  zai: {
-    // Single verified model (docs.z.ai, 2026-07-08); GLM-5.2 spans tiers —
-    // near-frontier SWE quality at cheap-tier pricing is its whole pitch.
-    cheap: "glm-5.2",
-    balanced: "glm-5.2",
-    premium: "glm-5.2",
-  },
   ollama: {
     // Local model — whatever is pulled locally; override via OLLAMA_MODEL.
     cheap: process.env.OLLAMA_MODEL ?? "qwen3:8b",
@@ -60,8 +53,6 @@ export const PRICING: Record<string, [number, number]> = {
   // Gemini — approximate, verify
   "gemini-2.0-flash": [0.1, 0.4],
   "gemini-2.5-pro": [1.25, 10.0],
-  // Z.ai — first-party pricing, verified 2026-07-08 (web)
-  "glm-5.2": [1.4, 4.4],
 };
 
 /**
@@ -71,12 +62,10 @@ export const PRICING: Record<string, [number, number]> = {
 export const TIER_PROVIDER_ORDER: Record<Tier, ProviderName[]> = {
   // Ollama sits last everywhere: local 8B-class models are the fallback when
   // no cloud key exists (or the explicit choice via ollama/<model>), not the
-  // default. The learning loop may promote it per-intent later.
-  cheap: ["anthropic", "gemini", "zai", "openai", "ollama"],
-  // GLM-5.2 slots second for balanced: near-frontier SWE benchmark scores at
-  // ~1/3 the cost of sonnet-tier — exactly the tradeoff this tier optimizes.
-  balanced: ["anthropic", "zai", "openai", "gemini", "ollama"],
-  premium: ["anthropic", "openai", "zai", "gemini", "ollama"],
+  // default. Custom providers participate via explicit selection, not tiers.
+  cheap: ["anthropic", "gemini", "openai", "ollama"],
+  balanced: ["anthropic", "openai", "gemini", "ollama"],
+  premium: ["anthropic", "openai", "gemini", "ollama"],
 };
 
 export const DEFAULT_MAX_TOKENS = 4096;

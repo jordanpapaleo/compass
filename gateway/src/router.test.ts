@@ -151,27 +151,31 @@ describe("git context (Day 2)", () => {
   });
 });
 
-describe("zai / GLM provider", () => {
-  it("passthrough: glm-* → zai verbatim", () => {
-    const d = route(req("glm-5.2", [user("hi")]), {
-      availableProviders: ["anthropic", "openai", "gemini", "zai"],
+describe("custom providers", () => {
+  it("passthrough: <customId>/<model> routes to the custom provider", () => {
+    const d = route(req("groq/llama-3.3-70b", [user("hi")]), {
+      availableProviders: ["groq"],
+      customProviderIds: ["groq"],
     });
     expect(d.rule).toBe("passthrough");
-    expect(d.provider).toBe("zai");
-    expect(d.model).toBe("glm-5.2");
+    expect(d.provider).toBe("groq");
+    expect(d.model).toBe("llama-3.3-70b");
   });
 
-  it("balanced tier falls to zai when anthropic has no key", () => {
-    const d = route(req("compass/coding", [user("implement a function")]), {
-      availableProviders: ["zai", "gemini"],
+  it("unknown provider id is NOT treated as passthrough", () => {
+    // no customProviderIds → "foo/bar" falls through to intent routing
+    const d = route(req("foo/bar", [user("implement a function")]), {
+      availableProviders: ["anthropic"],
     });
-    expect(d.provider).toBe("zai");
-    expect(d.model).toBe("glm-5.2");
+    expect(d.rule).not.toBe("passthrough");
   });
 
-  it("glm-5.2 cost computes from verified pricing", () => {
-    // $1.40 in / $4.40 out per MTok
-    expect(costUSD("glm-5.2", 1_000_000, 1_000_000)).toBeCloseTo(5.8);
+  it("ollama passthrough still works without being a custom id", () => {
+    const d = route(req("ollama/qwen3:8b", [user("hi")]), {
+      availableProviders: ["ollama"],
+    });
+    expect(d.provider).toBe("ollama");
+    expect(d.model).toBe("qwen3:8b");
   });
 });
 
@@ -205,7 +209,7 @@ describe("preferences (Day 3)", () => {
     cloud_local: 50,
   };
   const allProviders = {
-    availableProviders: ["anthropic", "openai", "gemini", "zai", "ollama"] as const,
+    availableProviders: ["anthropic", "openai", "gemini", "ollama"] as const,
   };
   const envAll = { availableProviders: [...allProviders.availableProviders] };
 
@@ -267,10 +271,10 @@ describe("preferences (Day 3)", () => {
   it("strong speed preference reorders by observed latency", () => {
     const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
       prefs: { ...neutral, speed_accuracy: 10 },
-      avgLatencyMs: { anthropic: 4000, zai: 900, openai: 2500 },
+      avgLatencyMs: { anthropic: 4000, gemini: 900, openai: 2500 },
     });
     // speed also drops tier to cheap; fastest observed provider wins
-    expect(d.provider).toBe("zai");
+    expect(d.provider).toBe("gemini");
     expect(d.reason.join(" ")).toMatch(/reordered by observed latency/);
   });
 
