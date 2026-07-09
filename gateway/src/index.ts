@@ -1,8 +1,10 @@
 import { serve } from "@hono/node-server";
 import { PORT } from "./config.ts";
 import { logPath } from "./log.ts";
+import { applyToEnv } from "./providerConfig.ts";
 import { createApp } from "./server.ts";
 
+await applyToEnv(); // load app-managed provider keys into env before serving
 const app = createApp();
 
 serve({ fetch: app.fetch, port: PORT }, (info) => {

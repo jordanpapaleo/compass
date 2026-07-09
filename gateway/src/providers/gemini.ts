@@ -50,6 +50,10 @@ export const geminiAdapter: ProviderAdapter = {
     return Boolean(apiKey());
   },
 
+  reset() {
+    client = null;
+  },
+
   async complete(params): Promise<CompletionResult> {
     const response = await getClient().models.generateContent(toGemini(params));
     return {

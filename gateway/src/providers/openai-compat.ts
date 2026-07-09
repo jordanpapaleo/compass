@@ -66,6 +66,10 @@ export function createOpenAICompatAdapter(cfg: OpenAICompatConfig): ProviderAdap
       };
     },
 
+    reset() {
+      client = null;
+    },
+
     async *stream(params: CompletionParams): AsyncGenerator<string, CompletionResult> {
       const stream = await getClient().chat.completions.create({
         model: params.model,

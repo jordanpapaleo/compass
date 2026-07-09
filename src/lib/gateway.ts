@@ -50,3 +50,100 @@ export async function fetchRoutingLog(limit = 50): Promise<RoutingLogEntry[]> {
   const body = (await res.json()) as { entries: RoutingLogEntry[] };
   return body.entries;
 }
+
+// ── Provider management ────────────────────────────────────────────
+
+export interface ProviderInfo {
+  name: string;
+  configured: boolean;
+  field: "api_key" | "base_url";
+}
+
+export async function fetchProviders(): Promise<ProviderInfo[]> {
+  const res = await fetch(`${GATEWAY_URL}/v1/providers`);
+  const body = (await res.json()) as { providers: ProviderInfo[] };
+  return body.providers;
+}
+
+export async function setProviderKey(name: string, value: string): Promise<void> {
+  await fetch(`${GATEWAY_URL}/v1/providers/${name}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+}
+
+export async function clearProviderKey(name: string): Promise<void> {
+  await fetch(`${GATEWAY_URL}/v1/providers/${name}`, { method: "DELETE" });
+}
+
+// ── Chat (streaming) ───────────────────────────────────────────────
+
+export interface ChatMsg {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface RoutedInfo {
+  provider: string;
+  model: string;
+  intent: string;
+  cost_usd: number | null;
+}
+
+/**
+ * Stream a chat completion through Compass. Calls onDelta for each text chunk
+ * and returns the routing info from the final chunk's `compass` field.
+ */
+export async function streamChat(
+  model: string,
+  messages: ChatMsg[],
+  onDelta: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<RoutedInfo | null> {
+  const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, messages, stream: true, max_tokens: 2000 }),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const err = (await res.json().catch(() => null)) as { error?: { message: string } } | null;
+    throw new Error(err?.error?.message ?? `gateway error ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let routed: RoutedInfo | null = null;
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6);
+      if (data === "[DONE]") continue;
+      const chunk = JSON.parse(data) as {
+        choices?: Array<{ delta?: { content?: string } }>;
+        compass?: { provider: string; model: string; intent: string };
+        error?: { message: string };
+      };
+      if (chunk.error) throw new Error(chunk.error.message);
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) onDelta(delta);
+      if (chunk.compass) {
+        routed = {
+          provider: chunk.compass.provider,
+          model: chunk.compass.model,
+          intent: chunk.compass.intent,
+          cost_usd: null,
+        };
+      }
+    }
+  }
+  return routed;
+}

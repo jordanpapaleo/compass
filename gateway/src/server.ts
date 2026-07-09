@@ -22,6 +22,7 @@ import { zaiAdapter } from "./providers/zai.ts";
 import { analyze } from "./learning.ts";
 import { getOverrides, removeOverride, setOverride, type IntentOverride } from "./overrides.ts";
 import { getPreferences, sanitize, setPreferences, type Preferences } from "./preferences.ts";
+import { clearKey, setKey } from "./providerConfig.ts";
 import { resolveMaxTokens, route } from "./router.ts";
 import type {
   ChatCompletionRequest,
@@ -129,6 +130,37 @@ export function createApp(): Hono {
       })),
     }),
   );
+
+  // Provider key management — set/clear from the app instead of a .env file.
+  app.get("/v1/providers", (c) =>
+    c.json({
+      providers: (Object.keys(ADAPTERS) as ProviderName[]).map((p) => ({
+        name: p,
+        configured: ADAPTERS[p].available(),
+        // ollama takes a base URL, the rest take an API key.
+        field: p === "ollama" ? "base_url" : "api_key",
+      })),
+    }),
+  );
+
+  app.put("/v1/providers/:name", async (c) => {
+    const name = c.req.param("name") as ProviderName;
+    if (!(name in ADAPTERS)) return c.json({ error: { message: `unknown provider "${name}"` } }, 404);
+    const body = (await c.req.json().catch(() => null)) as { value?: string } | null;
+    if (!body || typeof body.value !== "string" || !body.value.trim())
+      return c.json({ error: { message: "body needs a non-empty `value`" } }, 400);
+    await setKey(name, body.value.trim());
+    ADAPTERS[name].reset?.(); // drop any cached client so the new key is used
+    return c.json({ name, configured: ADAPTERS[name].available() });
+  });
+
+  app.delete("/v1/providers/:name", async (c) => {
+    const name = c.req.param("name") as ProviderName;
+    if (!(name in ADAPTERS)) return c.json({ error: { message: `unknown provider "${name}"` } }, 404);
+    await clearKey(name);
+    ADAPTERS[name].reset?.();
+    return c.json({ name, configured: ADAPTERS[name].available() });
+  });
 
   // Dry run — full routing decision, no provider call. Works without keys.
   app.post("/v1/route", async (c) => {

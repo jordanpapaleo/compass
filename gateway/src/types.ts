@@ -115,6 +115,8 @@ export interface ProviderAdapter {
   complete(params: CompletionParams): Promise<CompletionResult>;
   /** Yields text deltas; the server frames them as OpenAI-style SSE chunks. */
   stream(params: CompletionParams): AsyncGenerator<string, CompletionResult>;
+  /** Drop any cached SDK client so the next call re-reads env (key changed). */
+  reset?(): void;
 }
 
 // ── Routing log entry (persisted JSONL, one line per request) ──────

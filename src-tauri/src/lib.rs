@@ -5,7 +5,8 @@ use tauri::menu::{
 };
 use tauri::{Emitter, Manager};
 
-/// Handle to the gateway sidecar process so we can kill it on app exit.
+/// Handle to the gateway sidecar process so we can start/stop it and kill it
+/// on app exit.
 struct GatewaySidecar(Mutex<Option<Child>>);
 
 /// Spawn the Compass gateway as a supervised child process.
@@ -28,12 +29,42 @@ fn spawn_gateway() -> Option<Child> {
             Some(child)
         }
         Err(e) => {
-            // Likely `node` missing from PATH (GUI-launched apps get a minimal
-            // PATH on macOS) — dev runs from a terminal are unaffected.
             eprintln!("compass: failed to spawn gateway sidecar: {e}");
             None
         }
     }
+}
+
+/// Is the app-managed gateway process currently running? (Liveness of the HTTP
+/// endpoint is polled separately by the dashboard via /health.)
+#[tauri::command]
+fn gateway_status(state: tauri::State<'_, GatewaySidecar>) -> bool {
+    state.0.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+/// Start the managed gateway if it isn't already running. Returns running state.
+#[tauri::command]
+fn gateway_start(state: tauri::State<'_, GatewaySidecar>) -> bool {
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    if guard.is_none() {
+        *guard = spawn_gateway();
+    }
+    guard.is_some()
+}
+
+/// Stop the managed gateway. Returns running state (false when stopped).
+#[tauri::command]
+fn gateway_stop(state: tauri::State<'_, GatewaySidecar>) -> bool {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    false
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -42,6 +73,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            gateway_status,
+            gateway_start,
+            gateway_stop
+        ])
         .setup(|app| {
             // ── Gateway sidecar ───────────────────────────────────────────
             app.manage(GatewaySidecar(Mutex::new(spawn_gateway())));
@@ -81,18 +117,31 @@ pub fn run() {
                 .item(&PredefinedMenuItem::select_all(app, None)?)
                 .build()?;
 
+            // ── Help menu ─────────────────────────────────────────────────
+            let help_setup = MenuItemBuilder::new("Setup & Usage")
+                .id("show_help")
+                .build(app)?;
+            let help_menu = SubmenuBuilder::new(app, "Help")
+                .item(&help_setup)
+                .build()?;
+
             let menu = MenuBuilder::new(app)
                 .item(&app_menu)
                 .item(&edit_menu)
+                .item(&help_menu)
                 .build()?;
 
             app.set_menu(menu)?;
 
             let app_handle = app.handle().clone();
-            app.on_menu_event(move |_app, event| {
-                if event.id().as_ref() == "open_settings" {
+            app.on_menu_event(move |_app, event| match event.id().as_ref() {
+                "open_settings" => {
                     let _ = app_handle.emit("open-settings", ());
                 }
+                "show_help" => {
+                    let _ = app_handle.emit("show-help", ());
+                }
+                _ => {}
             });
 
             Ok(())

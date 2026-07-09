@@ -42,6 +42,10 @@ export const anthropicAdapter: ProviderAdapter = {
     return Boolean(process.env.ANTHROPIC_API_KEY);
   },
 
+  reset() {
+    client = null;
+  },
+
   async complete(params): Promise<CompletionResult> {
     const response = await getClient().messages.create(toAnthropic(params));
     const text = response.content
