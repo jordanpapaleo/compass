@@ -32,6 +32,13 @@ export const TIER_MODELS: Record<ProviderName, Record<Tier, string>> = {
     balanced: "gemini-2.0-flash",
     premium: "gemini-2.5-pro",
   },
+  zai: {
+    // Single verified model (docs.z.ai, 2026-07-08); GLM-5.2 spans tiers —
+    // near-frontier SWE quality at cheap-tier pricing is its whole pitch.
+    cheap: "glm-5.2",
+    balanced: "glm-5.2",
+    premium: "glm-5.2",
+  },
 };
 
 /** USD per 1M tokens: [input, output]. null = unknown, cost reported as null. */
@@ -47,6 +54,8 @@ export const PRICING: Record<string, [number, number]> = {
   // Gemini — approximate, verify
   "gemini-2.0-flash": [0.1, 0.4],
   "gemini-2.5-pro": [1.25, 10.0],
+  // Z.ai — first-party pricing, verified 2026-07-08 (web)
+  "glm-5.2": [1.4, 4.4],
 };
 
 /**
@@ -54,9 +63,11 @@ export const PRICING: Record<string, [number, number]> = {
  * Rule of thumb: cheap → fastest/cheapest first; premium → strongest first.
  */
 export const TIER_PROVIDER_ORDER: Record<Tier, ProviderName[]> = {
-  cheap: ["anthropic", "gemini", "openai"],
-  balanced: ["anthropic", "openai", "gemini"],
-  premium: ["anthropic", "openai", "gemini"],
+  cheap: ["anthropic", "gemini", "zai", "openai"],
+  // GLM-5.2 slots second for balanced: near-frontier SWE benchmark scores at
+  // ~1/3 the cost of sonnet-tier — exactly the tradeoff this tier optimizes.
+  balanced: ["anthropic", "zai", "openai", "gemini"],
+  premium: ["anthropic", "openai", "zai", "gemini"],
 };
 
 export const DEFAULT_MAX_TOKENS = 4096;

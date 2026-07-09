@@ -149,6 +149,7 @@ function matchPassthrough(model: string): { provider: ProviderName } | null {
   if (/^claude-/i.test(model)) return { provider: "anthropic" };
   if (/^(gpt-|o[0-9])/i.test(model)) return { provider: "openai" };
   if (/^gemini-/i.test(model)) return { provider: "gemini" };
+  if (/^glm-/i.test(model)) return { provider: "zai" };
   return null;
 }
 

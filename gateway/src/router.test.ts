@@ -150,3 +150,27 @@ describe("git context (Day 2)", () => {
     expect(d.model).toBe("claude-haiku-4-5"); // stays cheap
   });
 });
+
+describe("zai / GLM provider", () => {
+  it("passthrough: glm-* → zai verbatim", () => {
+    const d = route(req("glm-5.2", [user("hi")]), {
+      availableProviders: ["anthropic", "openai", "gemini", "zai"],
+    });
+    expect(d.rule).toBe("passthrough");
+    expect(d.provider).toBe("zai");
+    expect(d.model).toBe("glm-5.2");
+  });
+
+  it("balanced tier falls to zai when anthropic has no key", () => {
+    const d = route(req("compass/coding", [user("implement a function")]), {
+      availableProviders: ["zai", "gemini"],
+    });
+    expect(d.provider).toBe("zai");
+    expect(d.model).toBe("glm-5.2");
+  });
+
+  it("glm-5.2 cost computes from verified pricing", () => {
+    // $1.40 in / $4.40 out per MTok
+    expect(costUSD("glm-5.2", 1_000_000, 1_000_000)).toBeCloseTo(5.8);
+  });
+});

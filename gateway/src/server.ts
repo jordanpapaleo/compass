@@ -17,6 +17,7 @@ import { appendLog, readLog } from "./log.ts";
 import { anthropicAdapter } from "./providers/anthropic.ts";
 import { geminiAdapter } from "./providers/gemini.ts";
 import { openaiAdapter } from "./providers/openai.ts";
+import { zaiAdapter } from "./providers/zai.ts";
 import { resolveMaxTokens, route } from "./router.ts";
 import type {
   ChatCompletionRequest,
@@ -32,6 +33,7 @@ const ADAPTERS: Record<ProviderName, ProviderAdapter> = {
   anthropic: anthropicAdapter,
   openai: openaiAdapter,
   gemini: geminiAdapter,
+  zai: zaiAdapter,
 };
 
 function availableProviders(): ProviderName[] {

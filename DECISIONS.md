@@ -105,3 +105,23 @@ Non-browser clients (curl/SDKs) send no Origin and are unaffected.
 - Cross-provider fallback retry on provider *failure* (only key-absence
   fallback exists now) — Execution Engine work, spec'd for later days.
 - Anthropic prompt-caching passthrough, parallel/voting modes — future.
+
+## Provider addition — Z.ai / GLM-5.2 (2026-07-08)
+
+### Why
+Near-frontier SWE-benchmark quality at ~1/3 sonnet-tier cost, MIT open
+weights — exactly the quality/cost tradeoff Compass's balanced tier exists to
+exploit, and a first step toward the spec's open/local-model future (Ollama,
+LM Studio use the same integration shape).
+
+### How
+- Z.ai's API is natively OpenAI-compatible (their docs prescribe the OpenAI
+  SDK with swapped base URL) — refactored the OpenAI adapter into
+  `providers/openai-compat.ts`, a factory parameterized by name/baseURL/key
+  env. `openai` and `zai` are two instances; local runtimes can be a third.
+- Verified against docs.z.ai + web (2026-07-08), NOT the marketing email:
+  base `https://api.z.ai/api/paas/v4/`, model `glm-5.2`, $1.40/$4.40 per MTok.
+- Routing: `glm-*` passthrough; tier order slots zai 2nd for balanced,
+  3rd premium, 3rd cheap. `ZAI_API_KEY` in .env.
+- Benchmark claims from the email (FrontierSWE 74.4 etc.) are NOT encoded
+  anywhere — routing preference is based on verified pricing only.
