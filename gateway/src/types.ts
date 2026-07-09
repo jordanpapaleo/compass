@@ -85,6 +85,8 @@ export interface RoutingDecision {
   model: string;
   /** The rule that fired, machine-readable. */
   rule: string;
+  /** Resolved tier for intent-routed requests (absent for passthrough/override). */
+  tier?: "cheap" | "balanced" | "premium";
   /** Human-readable explanation, one line per factor. */
   reason: string[];
   /** Rough input-size estimate used by size-sensitive rules. */

@@ -11,6 +11,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { ulid } from "ulid";
+import { anthropicToText, pickAnthropicModel } from "./anthropicProxy.ts";
 import { costUSD } from "./config.ts";
 import { getGitContext, type GitContext } from "./context/git.ts";
 import { appendLog, avgLatencyByProvider, readLog } from "./log.ts";
@@ -249,6 +250,123 @@ export function createApp(): Hono {
   app.delete("/v1/overrides/:intent", async (c) =>
     c.json({ overrides: await removeOverride(c.req.param("intent") as Intent) }),
   );
+
+  // Anthropic-compatible endpoint — lets Claude Code route through Compass.
+  // Routes among Claude models by intent, then proxies raw to Anthropic
+  // (full tool/thinking/streaming fidelity). See anthropicProxy.ts.
+  app.post("/v1/messages", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as
+      | { model?: string; messages?: Array<{ role: string; content: unknown }>; system?: unknown; stream?: boolean; anthropic_version?: string }
+      | null;
+    if (!body || typeof body.model !== "string" || !Array.isArray(body.messages)) {
+      return c.json(
+        { type: "error", error: { type: "invalid_request_error", message: "model and messages[] are required" } },
+        400,
+      );
+    }
+    // Compass proxies with its OWN Anthropic key — it must be configured.
+    if (!getAdapter("anthropic")?.available()) {
+      return c.json(
+        {
+          type: "error",
+          error: {
+            type: "authentication_error",
+            message: "Compass has no Anthropic key configured — add one in the Providers panel.",
+          },
+        },
+        401,
+      );
+    }
+
+    const id = `msg-${ulid()}`;
+    const git = await getGitContext(c.req.header("x-compass-cwd"));
+    const [prefs, avgLatencyMs, overrides] = await Promise.all([
+      getPreferences(),
+      avgLatencyByProvider(),
+      getOverrides(),
+    ]);
+    const decision = route(
+      { model: body.model, messages: anthropicToText(body.system, body.messages) },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments() },
+      { git, prefs, avgLatencyMs, overrides },
+    );
+    const model = pickAnthropicModel(decision);
+    const eff: RoutingDecision = {
+      ...decision,
+      provider: "anthropic",
+      model,
+      alternates: undefined,
+      reason: [...decision.reason, `Anthropic-protocol endpoint → proxying to ${model}`],
+    };
+
+    const started = performance.now();
+    let upstream: Response;
+    try {
+      upstream = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+          "anthropic-version": body.anthropic_version ?? "2023-06-01",
+        },
+        body: JSON.stringify({ ...body, model }),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await logRequest(id, eff, {
+        status: "error",
+        error: message,
+        latencyMs: Math.round(performance.now() - started),
+        stream: Boolean(body.stream),
+        git,
+        prefs,
+      });
+      return c.json({ type: "error", error: { type: "api_error", message } }, 502);
+    }
+
+    if (body.stream) {
+      // Pass the SSE stream straight through (tools/thinking preserved).
+      await logRequest(id, eff, {
+        status: upstream.ok ? "ok" : "error",
+        ...(upstream.ok ? {} : { error: `anthropic ${upstream.status}` }),
+        latencyMs: Math.round(performance.now() - started),
+        stream: true,
+        git,
+        prefs,
+      });
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: { "content-type": "text/event-stream", "cache-control": "no-cache" },
+      });
+    }
+
+    const json = (await upstream.json().catch(() => null)) as {
+      usage?: { input_tokens?: number; output_tokens?: number };
+      stop_reason?: string;
+      error?: { message?: string };
+    } | null;
+    const latencyMs = Math.round(performance.now() - started);
+    const usage = json?.usage;
+    await logRequest(id, eff, {
+      status: upstream.ok ? "ok" : "error",
+      ...(upstream.ok ? {} : { error: json?.error?.message ?? `anthropic ${upstream.status}` }),
+      latencyMs,
+      ...(usage
+        ? {
+            result: {
+              text: "",
+              finishReason: json?.stop_reason ?? "end_turn",
+              inputTokens: usage.input_tokens ?? 0,
+              outputTokens: usage.output_tokens ?? 0,
+            },
+          }
+        : {}),
+      stream: false,
+      git,
+      prefs,
+    });
+    return c.json(json ?? {}, upstream.status as 200);
+  });
 
   app.post("/v1/chat/completions", async (c) => {
     const parsed = validate(await c.req.json().catch(() => null));

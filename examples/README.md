@@ -78,6 +78,25 @@ chat panel lands.)
 > On macOS, `host.docker.internal:4000` instead of `localhost:4000` if the container
 > can't reach the gateway.
 
+### Claude Code (Anthropic protocol)
+Claude Code speaks Anthropic's API, not OpenAI's — so it uses the `/v1/messages`
+endpoint. Point it at Compass and it routes among **Claude models** by intent
+(commit message → Haiku, architecture → Opus, …), proxying to Anthropic with full
+tool/streaming fidelity.
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:4000
+export ANTHROPIC_MODEL=compass/auto        # or a specific model like claude-opus-4-8
+export ANTHROPIC_API_KEY=unused-compass-has-its-own   # Claude Code wants one set; Compass ignores it
+claude
+```
+
+Compass proxies with **its own** Anthropic key (add it in the Providers panel), so
+the key Claude Code sends is ignored. Requires an Anthropic key configured in
+Compass. Routing stays on Claude models (cross-provider tool translation is future
+work) — but which Claude model is chosen by intent + your sliders, and every call
+shows up in the Routing Log.
+
 ### Terminal coding agent — Aider
 ```bash
 export OPENAI_API_BASE=http://localhost:4000/v1

@@ -198,8 +198,10 @@ compass/
 └── ~/.compass/              your data: routing-log.jsonl, preferences.json, overrides.json
 ```
 
-Endpoints: `POST /v1/chat/completions` (routed + executed), `POST /v1/route` (dry-run
-decision, works without keys), `GET /v1/routing-log`, `GET /v1/insights`,
+Endpoints: `POST /v1/chat/completions` (OpenAI-compatible, routed + executed),
+`POST /v1/messages` (Anthropic-compatible, for Claude Code), `POST /v1/route` (dry-run
+decision, works without keys), `GET|PUT|DELETE /v1/providers`,
+`GET|POST|DELETE /v1/custom-providers`, `GET /v1/routing-log`, `GET /v1/insights`,
 `GET|PUT /v1/preferences`, `GET|POST|DELETE /v1/overrides`, `GET /health`.
 
 **Your data never leaves your machine** except the model calls themselves, which go
@@ -223,30 +225,33 @@ Release/signing setup is in [SIGNING.md](./SIGNING.md).
 
 ## Current limitations
 
-- **Claude Code can't route through Compass yet.** Claude Code speaks Anthropic's
-  `/v1/messages` protocol; Compass only exposes the OpenAI `/v1/chat/completions` shape.
-  An Anthropic-compatible endpoint is the fix (see Roadmap).
-- **Keys live in `.env`** — fine for you, not shippable to others.
-- **No built-in chat** — Compass is routing infrastructure; you drive it from another
-  client.
-- **On provider failure Compass surfaces the error**; it does not yet auto-retry on a
-  different provider (only fills in when a provider has no key).
+- **`/v1/messages` (Claude Code) stays on Claude models** — routing among Claude models
+  by intent, proxied to Anthropic with full tool/streaming fidelity. Routing an Anthropic
+  request to a non-Anthropic provider would need tool-call translation (future work).
+- **Custom providers auto-route only when you assign them a tier** — otherwise they're
+  explicit-selection (pick them in Chat or `id/model`).
+- **Packaged keys are local plaintext** (`~/.compass/config.json`, owner-only) — an
+  OS-keychain upgrade would harden this.
+- **Signed `.dmg`** needs Apple credentials in `sign.sh` (see `SIGNING.md`); the unsigned
+  `.app` builds and runs today.
 
-## Roadmap
+## Done / Roadmap
 
-In rough priority order for turning this from a working proof-of-concept into a daily
-driver:
+Most of the original roadmap shipped:
 
-1. **In-app key & provider management** — a Settings screen that stores keys in the OS
-   keychain and lets you add providers/models without touching files. *The prerequisite
-   for anyone but you using it.*
-2. **Anthropic-compatible endpoint** — so Claude Code (and any Anthropic-SDK client) can
-   route through Compass.
-3. **Built-in chat panel** — make the dashboard a place you can use Compass directly,
-   no other client required.
-4. **Cross-provider failover** — retry a failed request on the next provider.
-5. **Packaged, signed desktop build** — the Tauri pipeline is ready; needs the sidecar
-   bundled as a binary.
+- ✅ **In-app key & provider management** — Providers panel; keys in `~/.compass/config.json`.
+- ✅ **Add any custom OpenAI-compatible provider** — no release needed.
+- ✅ **Anthropic-compatible endpoint** — Claude Code routes through Compass (`/v1/messages`).
+- ✅ **Built-in chat panel** — use Compass directly in the dashboard.
+- ✅ **Cross-provider failover** — retry the next provider on error (streaming + non-streaming).
+- ✅ **Custom-provider auto-routing** — assign a custom provider to a tier.
+- ✅ **Packaged desktop app** — self-contained `Compass.app` with a bundled gateway sidecar.
+
+Remaining:
+
+- **Signed, notarized `.dmg`** via `release.sh` (needs Apple creds in `sign.sh`).
+- **OS-keychain** key storage (currently local plaintext).
+- **Cross-protocol tool translation** so `/v1/messages` can route to non-Anthropic providers.
 
 ---
 

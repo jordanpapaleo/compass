@@ -283,6 +283,7 @@ export function route(
     provider: chosen.provider,
     model: chosen.model,
     rule: `intent-tier:${intent}→${tier}`,
+    tier,
     reason,
     estimated_input_tokens: estTokens,
     ...(temperature !== undefined ? { temperature } : {}),

@@ -234,3 +234,25 @@ which is exactly why the in-app key management exists.
   filled into `sign.sh` (SIGNING.md) — that's the intended release path.
 - Build script is aarch64-only in practice (uses the host's node); cross-arch
   would need per-target node binaries.
+
+## Claude Code endpoint — Anthropic-compatible /v1/messages (2026-07-09)
+
+Claude Code speaks Anthropic's Messages API, not OpenAI's. `POST /v1/messages`
+(anthropicProxy.ts + server.ts) lets it route through Compass:
+- Reduces the Anthropic request (system + message blocks, incl. tool_result
+  text) to Compass's {role,content} for intent detection.
+- Routes via the normal engine; `pickAnthropicModel()` maps the chosen tier to
+  the Claude model (or honors an explicit claude-* passthrough).
+- **Proxies raw to api.anthropic.com** with Compass's own key — so tools,
+  thinking, and streaming keep 100% fidelity (no lossy translation).
+- Cross-protocol routing (Anthropic request → non-Anthropic provider) is out of
+  scope: it stays on Claude models. The router still picks WHICH Claude model by
+  intent + sliders, and every call is logged.
+- Compass ignores the client's key and uses ANTHROPIC_API_KEY from config; the
+  user sets any placeholder key for Claude Code and configures the real one in
+  the Providers panel. Setup: ANTHROPIC_BASE_URL=localhost:4000, ANTHROPIC_MODEL=compass/auto.
+
+### Verified
+Anthropic-shaped requests routed commit-message→haiku and architecture→opus,
+returned proper Anthropic responses with usage; streaming passed native
+message_start/... SSE through; all logged.
