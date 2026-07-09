@@ -7,7 +7,8 @@
  * path, no release required.
  */
 
-import { type CustomProvider, getCustomProviders } from "./providerConfig.ts";
+import { TIER_MODELS } from "./config.ts";
+import { type CustomProvider, getCustomProviders, getDisabledModels } from "./providerConfig.ts";
 import { anthropicAdapter } from "./providers/anthropic.ts";
 import { geminiAdapter } from "./providers/gemini.ts";
 import { createOpenAICompatAdapter } from "./providers/openai-compat.ts";
@@ -113,4 +114,36 @@ export function customModelOptions(): Array<{ provider: string; label: string; m
   return customMeta.flatMap((c) =>
     c.models.map((m) => ({ provider: c.id, label: `${c.label}: ${m}`, model: `${c.id}/${m}` })),
   );
+}
+
+export interface RoutableModel {
+  model: string;
+  provider: string;
+  enabled: boolean;
+}
+
+/**
+ * Every model behind a configured provider — the routing-target catalog for
+ * the Gateway chips. Built-in tier models + custom-provider models. Models the
+ * user has turned off are marked `enabled: false`.
+ */
+export async function routableModels(): Promise<RoutableModel[]> {
+  const disabled = new Set(await getDisabledModels());
+  const out: RoutableModel[] = [];
+  const seen = new Set<string>();
+  const push = (model: string, provider: string) => {
+    if (seen.has(model)) return;
+    seen.add(model);
+    out.push({ model, provider, enabled: !disabled.has(model) });
+  };
+  for (const name of BUILTIN_NAMES) {
+    if (!BUILTIN[name]?.available()) continue;
+    const tiers = TIER_MODELS[name as keyof typeof TIER_MODELS];
+    if (tiers) for (const m of new Set(Object.values(tiers))) push(m, name);
+  }
+  for (const c of customMeta) {
+    if (!custom[c.id]?.available()) continue;
+    for (const m of c.models) push(m, c.id);
+  }
+  return out;
 }

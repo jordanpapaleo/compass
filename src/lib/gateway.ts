@@ -106,6 +106,28 @@ export async function removeCustomProvider(id: string): Promise<void> {
   await fetch(`${GATEWAY_URL}/v1/custom-providers/${id}`, { method: "DELETE" });
 }
 
+// ── Routable model catalog (Gateway chips) ─────────────────────────
+
+export interface RoutableModel {
+  model: string;
+  provider: string;
+  enabled: boolean;
+}
+
+export async function fetchModels(): Promise<RoutableModel[]> {
+  const res = await fetch(`${GATEWAY_URL}/v1/models`);
+  const body = (await res.json()) as { models: RoutableModel[] };
+  return body.models;
+}
+
+export async function setModelEnabled(model: string, enabled: boolean): Promise<void> {
+  await fetch(`${GATEWAY_URL}/v1/models/${encodeURIComponent(model)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 // ── Chat (streaming) ───────────────────────────────────────────────
 
 export interface ChatMsg {

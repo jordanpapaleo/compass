@@ -22,8 +22,10 @@ import {
   addCustomProvider,
   clearKey,
   type CustomProvider,
+  getDisabledModels,
   removeCustomProvider,
   setKey,
+  setModelEnabled,
 } from "./providerConfig.ts";
 import {
   availableProviderNames,
@@ -34,6 +36,7 @@ import {
   isBuiltin,
   providerList,
   rebuildCustomAdapters,
+  routableModels,
 } from "./registry.ts";
 import { resolveMaxTokens, route } from "./router.ts";
 import type {
@@ -192,19 +195,32 @@ export function createApp(): Hono {
     return c.json({ ok: true });
   });
 
+  // Routing-target catalog: every model behind a configured provider + on/off.
+  app.get("/v1/models", async (c) => c.json({ models: await routableModels() }));
+
+  app.put("/v1/models/:model", async (c) => {
+    const model = c.req.param("model");
+    const body = (await c.req.json().catch(() => null)) as { enabled?: boolean } | null;
+    if (!body || typeof body.enabled !== "boolean")
+      return c.json({ error: { message: "body needs a boolean `enabled`" } }, 400);
+    await setModelEnabled(model, body.enabled);
+    return c.json({ model, enabled: body.enabled });
+  });
+
   // Dry run — full routing decision, no provider call. Works without keys.
   app.post("/v1/route", async (c) => {
     const parsed = validate(await c.req.json().catch(() => null));
     if (!parsed.ok) return c.json({ error: { message: parsed.error } }, 400);
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const [prefs, avgLatencyMs, overrides] = await Promise.all([
+    const [prefs, avgLatencyMs, overrides, disabledModels] = await Promise.all([
       getPreferences(),
       avgLatencyByProvider(),
       getOverrides(),
+      getDisabledModels(),
     ]);
     const decision = route(
       parsed.req,
-      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments(), disabledModels },
       { git, prefs, avgLatencyMs, overrides },
     );
     return c.json({ decision, git, preferences: prefs });
@@ -280,14 +296,15 @@ export function createApp(): Hono {
 
     const id = `msg-${ulid()}`;
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const [prefs, avgLatencyMs, overrides] = await Promise.all([
+    const [prefs, avgLatencyMs, overrides, disabledModels] = await Promise.all([
       getPreferences(),
       avgLatencyByProvider(),
       getOverrides(),
+      getDisabledModels(),
     ]);
     const decision = route(
       { model: body.model, messages: anthropicToText(body.system, body.messages) },
-      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments(), disabledModels },
       { git, prefs, avgLatencyMs, overrides },
     );
     const model = pickAnthropicModel(decision);
@@ -375,14 +392,15 @@ export function createApp(): Hono {
 
     const id = `cmpl-${ulid()}`;
     const git = await getGitContext(c.req.header("x-compass-cwd"));
-    const [prefs, avgLatencyMs, overrides] = await Promise.all([
+    const [prefs, avgLatencyMs, overrides, disabledModels] = await Promise.all([
       getPreferences(),
       avgLatencyByProvider(),
       getOverrides(),
+      getDisabledModels(),
     ]);
     const decision = route(
       req,
-      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments() },
+      { availableProviders: availableProviderNames(), customProviderIds: customProviderIds(), customTiers: customTierAssignments(), disabledModels },
       { git, prefs, avgLatencyMs, overrides },
     );
     const started = performance.now();

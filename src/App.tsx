@@ -3,12 +3,12 @@ import { listen } from "@tauri-apps/api/event";
 import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { Chat } from "./components/Chat";
+import { Configuration } from "./components/Configuration";
 import { HelpModal } from "./components/HelpModal";
-import { Personalization } from "./components/Personalization";
-import { Providers } from "./components/Providers";
+import { NotificationBell } from "./components/NotificationBell";
 import { RoutingLog } from "./components/RoutingLog";
-import { Suggestions } from "./components/Suggestions";
 import { fetchHealth } from "./lib/gateway";
+import { applyTheme, getTheme, type Theme } from "./lib/theme";
 
 type GatewayState = "connecting" | "online" | "offline";
 type Tab = "chat" | "dashboard";
@@ -18,9 +18,14 @@ const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in windo
 
 export default function App() {
   const [gateway, setGateway] = useState<GatewayState>("connecting");
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [showHelp, setShowHelp] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [theme, setTheme] = useState<Theme>(() => getTheme());
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   // Poll gateway liveness.
   useEffect(() => {
@@ -65,6 +70,8 @@ export default function App() {
     setToggling(false);
   };
 
+  const online = gateway === "online";
+
   return (
     <div className="flex h-screen flex-col bg-base-100 text-base-content">
       <header className="flex items-center gap-3 border-b border-[var(--color-border)] px-5 py-3">
@@ -74,7 +81,25 @@ export default function App() {
           <p className="text-xs text-[var(--color-text-muted)]">Personal AI routing layer</p>
         </div>
 
-        <GatewayBadge state={gateway} />
+        <NotificationBell online={online} />
+
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm btn-circle"
+          aria-label="Toggle theme"
+          onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+        >
+          <Icon icon={theme === "dark" ? "uil:sun" : "uil:moon"} className="text-lg" />
+        </button>
+
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm btn-circle"
+          aria-label="Help"
+          onClick={() => setShowHelp(true)}
+        >
+          <Icon icon="uil:question-circle" className="text-lg" />
+        </button>
 
         {IN_TAURI ? (
           <button
@@ -82,33 +107,18 @@ export default function App() {
             className="btn btn-ghost btn-sm"
             disabled={toggling || gateway === "connecting"}
             onClick={() => void toggleGateway()}
-            aria-label={gateway === "online" ? "Stop gateway" : "Start gateway"}
+            aria-label={online ? "Stop gateway" : "Start gateway"}
           >
-            <Icon icon={gateway === "online" ? "uil:pause" : "uil:play"} />
-            {gateway === "online" ? "Stop" : "Start"}
+            <Icon icon={online ? "uil:pause" : "uil:play"} />
+            {online ? "Stop" : "Start"}
           </button>
         ) : null}
 
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => setShowHelp(true)}
-          aria-label="Help"
-        >
-          <Icon icon="uil:question-circle" className="text-lg" />
-        </button>
+        <GatewayBadge state={gateway} />
       </header>
 
       <div className="border-b border-[var(--color-border)] px-5">
         <div role="tablist" className="tabs tabs-bordered">
-          <button
-            type="button"
-            role="tab"
-            className={`tab ${tab === "chat" ? "tab-active" : ""}`}
-            onClick={() => setTab("chat")}
-          >
-            <Icon icon="uil:comments" className="mr-1" /> Chat
-          </button>
           <button
             type="button"
             role="tab"
@@ -117,29 +127,26 @@ export default function App() {
           >
             <Icon icon="uil:dashboard" className="mr-1" /> Dashboard
           </button>
+          <button
+            type="button"
+            role="tab"
+            className={`tab ${tab === "chat" ? "tab-active" : ""}`}
+            onClick={() => setTab("chat")}
+          >
+            <Icon icon="uil:comments" className="mr-1" /> Chat
+          </button>
         </div>
       </div>
 
       <main className="min-h-0 flex-1 overflow-y-auto p-6">
-        {gateway === "offline" ? (
-          <div className="mb-4 rounded-lg border border-error/40 bg-error/10 p-3 text-sm">
-            Gateway offline on <span className="code">localhost:4000</span>.{" "}
-            {IN_TAURI
-              ? "Use Start above, or run it from the terminal."
-              : "Start it with cd gateway && npm run dev."}
-          </div>
-        ) : null}
-
-        {tab === "chat" ? (
-          <div className="h-full">
-            <Chat />
+        {tab === "dashboard" ? (
+          <div className="flex flex-col gap-4">
+            <Configuration online={online} />
+            <RoutingLog />
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            <Providers />
-            <Personalization />
-            <Suggestions />
-            <RoutingLog />
+          <div className="h-full">
+            <Chat />
           </div>
         )}
       </main>
@@ -153,14 +160,14 @@ function GatewayBadge({ state }: { state: GatewayState }) {
   if (state === "online") {
     return (
       <span className="badge badge-success gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-current" /> online
+        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-current" /> gateway online
       </span>
     );
   }
   if (state === "offline") {
     return (
       <span className="badge badge-error gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-current" /> offline
+        <span className="inline-block h-2 w-2 rounded-full bg-current" /> gateway offline
       </span>
     );
   }

@@ -51,6 +51,8 @@ export interface ProviderConfig {
   keys: Partial<Record<ProviderName, string>>;
   /** user-added OpenAI-compatible providers. */
   custom_providers: CustomProvider[];
+  /** models the user has turned OFF as routing targets. */
+  disabled_models: string[];
 }
 
 const DATA_DIR = process.env.COMPASS_DATA_DIR ?? join(homedir(), ".compass");
@@ -64,8 +66,9 @@ export async function getConfig(): Promise<ProviderConfig> {
     cache = JSON.parse(await readFile(CONFIG_PATH, "utf8")) as ProviderConfig;
     if (!cache.keys) cache.keys = {};
     if (!Array.isArray(cache.custom_providers)) cache.custom_providers = [];
+    if (!Array.isArray(cache.disabled_models)) cache.disabled_models = [];
   } catch {
-    cache = { keys: {}, custom_providers: [] };
+    cache = { keys: {}, custom_providers: [], disabled_models: [] };
   }
   return cache;
 }
@@ -143,4 +146,21 @@ export async function removeCustomProvider(id: string): Promise<CustomProvider[]
   cache = cfg;
   await persist();
   return cfg.custom_providers;
+}
+
+// ── Enabled/disabled models (routing targets) ──────────────────────
+
+export async function getDisabledModels(): Promise<string[]> {
+  return (await getConfig()).disabled_models;
+}
+
+export async function setModelEnabled(model: string, enabled: boolean): Promise<string[]> {
+  const cfg = await getConfig();
+  const set = new Set(cfg.disabled_models);
+  if (enabled) set.delete(model);
+  else set.add(model);
+  cfg.disabled_models = [...set];
+  cache = cfg;
+  await persist();
+  return cfg.disabled_models;
 }

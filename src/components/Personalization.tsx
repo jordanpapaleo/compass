@@ -10,19 +10,13 @@ interface Preferences {
 }
 
 interface Decision {
-  intent: string;
   provider: string;
   model: string;
-  rule: string;
   reason: string[];
   temperature?: number;
 }
 
-const AXES: Array<{
-  key: keyof Preferences;
-  left: string;
-  right: string;
-}> = [
+const AXES: Array<{ key: keyof Preferences; left: string; right: string }> = [
   { key: "quality_cost", left: "Quality", right: "Cost" },
   { key: "speed_accuracy", left: "Speed", right: "Accuracy" },
   { key: "deterministic_creative", left: "Deterministic", right: "Creative" },
@@ -38,16 +32,17 @@ const SAMPLE_PROMPTS: Array<{ label: string; prompt: string }> = [
 ];
 
 /**
- * Personalization (Day 3): preference sliders persisted in the gateway, plus
- * a live dry-run preview proving that moving a slider reroutes a request.
+ * Personalization section (Configuration card): 2×2 preference sliders and a
+ * live result strip showing what the current sliders route a sample request to,
+ * with an expandable "Why" reasoning list.
  */
-export function Personalization() {
+export function PersonalizationSection({ refreshKey = 0 }: { refreshKey?: number }) {
   const [prefs, setPrefs] = useState<Preferences | null>(null);
   const [sample, setSample] = useState(0);
   const [decision, setDecision] = useState<Decision | null>(null);
+  const [showWhy, setShowWhy] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load persisted preferences once.
   useEffect(() => {
     fetch(`${GATEWAY_URL}/v1/preferences`)
       .then((r) => r.json())
@@ -55,7 +50,6 @@ export function Personalization() {
       .catch(() => setPrefs(null));
   }, []);
 
-  // Live preview: dry-run the sample prompt whenever prefs (saved) change.
   const runPreview = useCallback(async (promptIdx: number) => {
     try {
       const res = await fetch(`${GATEWAY_URL}/v1/route`, {
@@ -73,14 +67,12 @@ export function Personalization() {
     }
   }, []);
 
-  // Preview on mount and when the sample prompt changes. Slider-driven
-  // refreshes happen in the save handler — /v1/route reads prefs server-side,
-  // so previewing before the PUT lands would show a stale decision.
+  // Re-run when the sample changes or when the parent bumps refreshKey
+  // (e.g. a model was toggled on/off in the Gateway chips).
   useEffect(() => {
     void runPreview(sample);
-  }, [sample, runPreview]);
+  }, [sample, runPreview, refreshKey]);
 
-  // Clear any pending debounced save on unmount.
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -91,7 +83,6 @@ export function Personalization() {
     if (!prefs) return;
     const next = { ...prefs, [key]: value };
     setPrefs(next);
-    // Debounced save; preview refreshes via the prefs effect after save.
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       fetch(`${GATEWAY_URL}/v1/preferences`, {
@@ -104,89 +95,82 @@ export function Personalization() {
     }, 250);
   };
 
+  if (prefs === null) {
+    return <p className="text-sm text-[var(--color-text-muted)]">Gateway offline.</p>;
+  }
+
   return (
-    <div className="card border border-[var(--color-border)] bg-base-200">
-      <div className="card-body">
-        <h2 className="card-title text-base">
-          <Icon icon="uil:sliders-v-alt" className="text-xl" />
-          Personalization
-        </h2>
-
-        {prefs === null ? (
-          <p className="text-sm text-[var(--color-text-muted)]">Gateway offline.</p>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2">
-            <div className="flex flex-col gap-4">
-              {AXES.map((axis) => (
-                <label key={axis.key} className="flex flex-col gap-1">
-                  <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
-                    <span className={prefs[axis.key] <= 24 ? "font-bold text-primary" : ""}>
-                      {axis.left}
-                    </span>
-                    <span className={prefs[axis.key] >= 76 ? "font-bold text-primary" : ""}>
-                      {axis.right}
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={prefs[axis.key]}
-                    className="range range-primary range-sm"
-                    aria-label={`${axis.left} versus ${axis.right}`}
-                    onChange={(e) => onSlide(axis.key, Number(e.target.value))}
-                  />
-                </label>
-              ))}
+    <>
+      <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+        {AXES.map((axis) => (
+          <label key={axis.key} className="flex flex-col gap-1">
+            <div className="flex justify-between text-xs text-[var(--color-text-muted)]">
+              <span className={prefs[axis.key] <= 24 ? "font-bold text-primary" : ""}>{axis.left}</span>
+              <span className={prefs[axis.key] >= 76 ? "font-bold text-primary" : ""}>{axis.right}</span>
             </div>
-
-            <div className="flex flex-col gap-2 rounded-lg border border-[var(--color-border)] bg-base-100 p-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-                  Live preview
-                </span>
-                <select
-                  className="select select-xs select-bordered"
-                  value={sample}
-                  aria-label="Sample request"
-                  onChange={(e) => setSample(Number(e.target.value))}
-                >
-                  {SAMPLE_PROMPTS.map((p, i) => (
-                    <option key={p.label} value={i}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {decision === null ? (
-                <p className="text-sm text-[var(--color-text-muted)]">No decision yet.</p>
-              ) : (
-                <>
-                  <p className="text-sm">
-                    <span className="badge badge-outline badge-sm mr-2">{decision.intent}</span>
-                    routes to{" "}
-                    <span className="font-semibold">
-                      {decision.provider}/{decision.model}
-                    </span>
-                    {decision.temperature !== undefined ? (
-                      <span className="text-[var(--color-text-muted)]">
-                        {" "}
-                        · temp {decision.temperature}
-                      </span>
-                    ) : null}
-                  </p>
-                  <ul className="list-disc pl-4 text-xs text-[var(--color-text-muted)]">
-                    {decision.reason.map((r) => (
-                      <li key={r}>{r}</li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          </div>
-        )}
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={prefs[axis.key]}
+              className="range range-primary range-sm"
+              aria-label={`${axis.left} versus ${axis.right}`}
+              onChange={(e) => onSlide(axis.key, Number(e.target.value))}
+            />
+          </label>
+        ))}
       </div>
-    </div>
+
+      {/* Live result strip — the outcome of the sliders above. */}
+      <div className="mt-4 rounded-lg border border-[var(--color-border)] bg-base-100">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm">
+          <span className="text-xs text-[var(--color-text-muted)]">A</span>
+          <select
+            className="select select-xs select-bordered"
+            value={sample}
+            aria-label="Sample request"
+            onChange={(e) => setSample(Number(e.target.value))}
+          >
+            {SAMPLE_PROMPTS.map((p, i) => (
+              <option key={p.label} value={i}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-[var(--color-text-muted)]">request</span>
+          <Icon icon="uil:arrow-right" className="text-[var(--color-text-muted)]" />
+          {decision ? (
+            <>
+              <span className="font-mono font-semibold">
+                {decision.provider}/{decision.model}
+              </span>
+              {decision.temperature !== undefined ? (
+                <span className="text-xs text-[var(--color-text-muted)]">temp {decision.temperature}</span>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-xs text-[var(--color-text-muted)]">no decision</span>
+          )}
+          <span className="flex-1" />
+          {decision && decision.reason.length ? (
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-base-content"
+              onClick={() => setShowWhy((v) => !v)}
+            >
+              <Icon icon={showWhy ? "uil:angle-up" : "uil:angle-down"} />
+              {showWhy ? "Hide reasoning" : `Why ${decision.reason.length} steps`}
+            </button>
+          ) : null}
+        </div>
+        {showWhy && decision ? (
+          <ul className="list-disc border-t border-[var(--color-border)] px-3 py-2 pl-7 text-xs text-[var(--color-text-muted)]">
+            {decision.reason.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </>
   );
 }

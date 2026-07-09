@@ -55,6 +55,8 @@ export interface RouterEnv {
   customProviderIds?: string[];
   /** Custom providers assigned to a tier, for auto-routing + failover. */
   customTiers?: Array<{ provider: string; tier: Tier; model: string }>;
+  /** Models the user has turned off — excluded from auto-routing candidates. */
+  disabledModels?: string[];
 }
 
 export interface RouterContext {
@@ -269,8 +271,15 @@ export function route(
 
   // Available candidates, in order. First is the pick; the rest are failover.
   const available = candidates.filter((c) => env.availableProviders.includes(c.provider));
-  const chosen = available[0] ?? candidates[0]!;
-  const alternates = available.slice(1);
+  // Drop models the user turned off — but never dead-end (keep all if that empties it).
+  const disabled = env.disabledModels ?? [];
+  const enabled = available.filter((c) => !disabled.includes(c.model));
+  const usable = enabled.length ? enabled : available;
+  if (disabled.length && enabled.length < available.length) {
+    reason.push(`Disabled models skipped: ${available.filter((c) => disabled.includes(c.model)).map((c) => c.model).join(", ")}`);
+  }
+  const chosen = usable[0] ?? candidates[0]!;
+  const alternates = usable.slice(1);
   reason.push(availabilityNote(chosen.provider, env));
   reason.push(`Provider "${chosen.provider}" tier "${tier}" → ${chosen.model}`);
   if (alternates.length) {

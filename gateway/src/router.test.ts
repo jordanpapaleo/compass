@@ -325,3 +325,24 @@ describe("failover + custom-tier routing", () => {
     expect(d.model).toBe("claude-opus-4-8");
   });
 });
+
+describe("disabled models", () => {
+  it("skips a disabled model and uses the next candidate", () => {
+    // architecture → premium → anthropic/claude-opus-4-8; disable it → next available
+    const d = route(req("compass/architecture", [user("design the architecture")]), {
+      availableProviders: ["anthropic", "openai"],
+      disabledModels: ["claude-opus-4-8"],
+    });
+    expect(d.model).not.toBe("claude-opus-4-8");
+    expect(d.provider).toBe("openai"); // openai premium is next
+    expect(d.reason.join(" ")).toMatch(/Disabled models skipped/);
+  });
+
+  it("never dead-ends: if all candidates are disabled, still routes", () => {
+    const d = route(req("compass/coding", [user("implement a parser")]), {
+      availableProviders: ["anthropic"],
+      disabledModels: ["claude-sonnet-5"], // the only balanced anthropic model
+    });
+    expect(d.provider).toBe("anthropic"); // falls back rather than failing
+  });
+});

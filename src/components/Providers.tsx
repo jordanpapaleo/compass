@@ -1,5 +1,5 @@
 import { Icon } from "@iconify/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addCustomProvider,
   clearProviderKey,
@@ -28,11 +28,15 @@ const HINTS: Record<string, string> = {
  * from the UI. Keys are stored locally (~/.compass/config.json, owner-only)
  * and never leave the machine.
  */
-export function Providers() {
+export function ProvidersSection({ onChange }: { onChange?: () => void }) {
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+
+  // Stable ref so `refresh` can notify the parent without re-subscribing.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const refresh = useCallback(async () => {
     try {
@@ -40,6 +44,7 @@ export function Providers() {
     } catch {
       setProviders(null);
     }
+    onChangeRef.current?.();
   }, []);
 
   useEffect(() => {
@@ -55,113 +60,87 @@ export function Providers() {
   };
 
   if (providers === null) {
-    return (
-      <div className="card border border-[var(--color-border)] bg-base-200">
-        <div className="card-body">
-          <h2 className="card-title text-base">
-            <Icon icon="uil:cog" className="text-xl" /> Providers
-          </h2>
-          <p className="text-sm text-[var(--color-text-muted)]">Gateway offline.</p>
-        </div>
-      </div>
-    );
+    return <p className="text-sm text-[var(--color-text-muted)]">Gateway offline.</p>;
   }
 
   const builtins = providers.filter((p) => !p.custom);
   const customs = providers.filter((p) => p.custom);
 
   return (
-    <div className="card border border-[var(--color-border)] bg-base-200">
-      <div className="card-body">
-        <h2 className="card-title text-base">
-          <Icon icon="uil:cog" className="text-xl" /> Providers
-        </h2>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Add keys here — no more editing files. Stored locally, owner-only, never leaves your Mac.
-        </p>
-
-        <ul className="mt-1 flex flex-col divide-y divide-[var(--color-border)]">
-          {builtins.map((p) => (
-            <li key={p.name} className="flex flex-col gap-2 py-3 first:pt-1">
-              <ProviderRow
-                title={BUILTIN_LABELS[p.name] ?? p.name}
-                configured={p.configured}
-                onEdit={() => {
-                  setEditing(editing === p.name ? null : p.name);
-                  setDraft("");
-                }}
-                onRemove={p.configured ? () => clearProviderKey(p.name).then(refresh) : undefined}
-                editLabel={p.configured ? "Change" : "Add"}
+    <>
+      <ul className="flex flex-col divide-y divide-[var(--color-border)]">
+        {builtins.map((p) => (
+          <li key={p.name} className="flex flex-col gap-2 py-3 first:pt-0">
+            <ProviderRow
+              title={BUILTIN_LABELS[p.name] ?? p.name}
+              configured={p.configured}
+              onEdit={() => {
+                setEditing(editing === p.name ? null : p.name);
+                setDraft("");
+              }}
+              onRemove={p.configured ? () => clearProviderKey(p.name).then(refresh) : undefined}
+              editLabel={p.configured ? "Change" : "Add"}
+            />
+            {editing === p.name ? (
+              <KeyInput
+                field={p.field}
+                hint={HINTS[p.name] ?? ""}
+                value={draft}
+                onChange={setDraft}
+                onSave={() => saveKey(p.name)}
+                onCancel={() => setEditing(null)}
               />
-              {editing === p.name ? (
-                <KeyInput
-                  field={p.field}
-                  hint={HINTS[p.name] ?? ""}
-                  value={draft}
-                  onChange={setDraft}
-                  onSave={() => saveKey(p.name)}
-                  onCancel={() => setEditing(null)}
-                />
-              ) : null}
+            ) : null}
+          </li>
+        ))}
+      </ul>
+
+      {/* ── Custom providers ─────────────────────────────────── */}
+      <div className="mt-3 flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase text-[var(--color-text-muted)]">
+          Custom providers
+        </span>
+        <button type="button" className="btn btn-ghost btn-xs ml-auto" onClick={() => setShowAdd((v) => !v)}>
+          <Icon icon="uil:plus" /> Add provider
+        </button>
+      </div>
+
+      {customs.length > 0 ? (
+        <ul className="mt-2 flex flex-col gap-1">
+          {customs.map((p) => (
+            <li
+              key={p.name}
+              className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-base-100 px-3 py-1.5 text-sm"
+            >
+              <span className="font-medium">{p.label}</span>
+              <span className="text-xs text-[var(--color-text-muted)]">{p.models?.join(", ")}</span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs ml-auto text-error"
+                aria-label={`Remove ${p.name}`}
+                onClick={() => removeCustomProvider(p.name).then(refresh)}
+              >
+                <Icon icon="uil:times" />
+              </button>
             </li>
           ))}
         </ul>
+      ) : (
+        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+          None yet. Add any OpenAI-compatible provider (Groq, OpenRouter, DeepSeek, a local server…)
+          — no new release needed.
+        </p>
+      )}
 
-        {/* ── Custom providers ─────────────────────────────────── */}
-        <div className="mt-4 border-t border-[var(--color-border)] pt-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-              Custom providers
-            </span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs ml-auto"
-              onClick={() => setShowAdd((v) => !v)}
-            >
-              <Icon icon="uil:plus" /> Add provider
-            </button>
-          </div>
-
-          {customs.length > 0 ? (
-            <ul className="mt-2 flex flex-col gap-1">
-              {customs.map((p) => (
-                <li
-                  key={p.name}
-                  className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-base-100 px-3 py-1.5 text-sm"
-                >
-                  <span className="font-medium">{p.label}</span>
-                  <span className="text-xs text-[var(--color-text-muted)]">
-                    {p.models?.join(", ")}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs ml-auto text-error"
-                    aria-label={`Remove ${p.name}`}
-                    onClick={() => removeCustomProvider(p.name).then(refresh)}
-                  >
-                    <Icon icon="uil:times" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-              None yet. Add any OpenAI-compatible provider (Groq, OpenRouter, DeepSeek, a local
-              server…) — no new release needed.
-            </p>
-          )}
-
-          {showAdd ? (
-            <AddCustomForm
-              onDone={() => {
-                setShowAdd(false);
-                refresh();
-              }}
-            />
-          ) : null}
-        </div>
-      </div>
-    </div>
+      {showAdd ? (
+        <AddCustomForm
+          onDone={() => {
+            setShowAdd(false);
+            refresh();
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
