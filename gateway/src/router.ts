@@ -71,7 +71,7 @@ export function route(
       intent: "chat",
       intent_source: "passthrough",
       provider: passthrough.provider,
-      model: req.model,
+      model: passthrough.model,
       rule: "passthrough",
       reason,
       estimated_input_tokens: estTokens,
@@ -145,18 +145,21 @@ export function route(
   };
 }
 
-function matchPassthrough(model: string): { provider: ProviderName } | null {
-  if (/^claude-/i.test(model)) return { provider: "anthropic" };
-  if (/^(gpt-|o[0-9])/i.test(model)) return { provider: "openai" };
-  if (/^gemini-/i.test(model)) return { provider: "gemini" };
-  if (/^glm-/i.test(model)) return { provider: "zai" };
+function matchPassthrough(model: string): { provider: ProviderName; model: string } | null {
+  if (/^claude-/i.test(model)) return { provider: "anthropic", model };
+  if (/^(gpt-|o[0-9])/i.test(model)) return { provider: "openai", model };
+  if (/^gemini-/i.test(model)) return { provider: "gemini", model };
+  if (/^glm-/i.test(model)) return { provider: "zai", model };
+  // ollama/<anything> → local, model name passed through verbatim
+  const local = /^ollama\/(.+)$/i.exec(model);
+  if (local) return { provider: "ollama", model: local[1]! };
   return null;
 }
 
 function availabilityNote(provider: ProviderName, env: RouterEnv): string {
   return env.availableProviders.includes(provider)
-    ? `Provider "${provider}" has an API key configured`
-    : `⚠ Provider "${provider}" has NO API key — execution will fail until one is set`;
+    ? `Provider "${provider}" is configured and available`
+    : `⚠ Provider "${provider}" is NOT configured — execution will fail until it is`;
 }
 
 export function resolveMaxTokens(req: ChatCompletionRequest): number {

@@ -39,6 +39,12 @@ export const TIER_MODELS: Record<ProviderName, Record<Tier, string>> = {
     balanced: "glm-5.2",
     premium: "glm-5.2",
   },
+  ollama: {
+    // Local model — whatever is pulled locally; override via OLLAMA_MODEL.
+    cheap: process.env.OLLAMA_MODEL ?? "qwen3:8b",
+    balanced: process.env.OLLAMA_MODEL ?? "qwen3:8b",
+    premium: process.env.OLLAMA_MODEL ?? "qwen3:8b",
+  },
 };
 
 /** USD per 1M tokens: [input, output]. null = unknown, cost reported as null. */
@@ -63,11 +69,14 @@ export const PRICING: Record<string, [number, number]> = {
  * Rule of thumb: cheap → fastest/cheapest first; premium → strongest first.
  */
 export const TIER_PROVIDER_ORDER: Record<Tier, ProviderName[]> = {
-  cheap: ["anthropic", "gemini", "zai", "openai"],
+  // Ollama sits last everywhere: local 8B-class models are the fallback when
+  // no cloud key exists (or the explicit choice via ollama/<model>), not the
+  // default. The learning loop may promote it per-intent later.
+  cheap: ["anthropic", "gemini", "zai", "openai", "ollama"],
   // GLM-5.2 slots second for balanced: near-frontier SWE benchmark scores at
   // ~1/3 the cost of sonnet-tier — exactly the tradeoff this tier optimizes.
-  balanced: ["anthropic", "zai", "openai", "gemini"],
-  premium: ["anthropic", "openai", "zai", "gemini"],
+  balanced: ["anthropic", "zai", "openai", "gemini", "ollama"],
+  premium: ["anthropic", "openai", "zai", "gemini", "ollama"],
 };
 
 export const DEFAULT_MAX_TOKENS = 4096;
@@ -78,7 +87,9 @@ export function costUSD(
   model: string,
   inputTokens: number,
   outputTokens: number,
+  provider?: string,
 ): number | null {
+  if (provider === "ollama") return 0; // local inference is free
   const p = PRICING[model];
   if (!p) return null;
   const [inPerM, outPerM] = p;

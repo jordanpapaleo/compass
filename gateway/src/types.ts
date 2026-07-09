@@ -71,7 +71,7 @@ export type Intent =
   | "search"
   | "chat";
 
-export type ProviderName = "anthropic" | "openai" | "gemini" | "zai";
+export type ProviderName = "anthropic" | "openai" | "gemini" | "zai" | "ollama";
 
 export interface RoutingDecision {
   /** Detected or explicitly requested intent. */

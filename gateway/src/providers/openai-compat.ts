@@ -12,19 +12,31 @@ import type { CompletionParams, CompletionResult, ProviderAdapter, ProviderName 
 
 export interface OpenAICompatConfig {
   name: ProviderName;
-  /** Env var holding the API key. */
-  apiKeyEnv: string;
+  /**
+   * Env var holding the API key — its presence gates availability.
+   * For keyless local runtimes, use `baseURLEnv` instead.
+   */
+  apiKeyEnv?: string;
   /** Omit for api.openai.com. */
   baseURL?: string;
+  /**
+   * Env var holding the base URL (keyless local runtimes: Ollama, LM Studio).
+   * Presence of the env var gates availability; a placeholder key is sent.
+   */
+  baseURLEnv?: string;
 }
 
 export function createOpenAICompatAdapter(cfg: OpenAICompatConfig): ProviderAdapter {
   let client: OpenAI | null = null;
 
+  const baseURL = (): string | undefined =>
+    cfg.baseURLEnv ? process.env[cfg.baseURLEnv] : cfg.baseURL;
+
   const getClient = (): OpenAI => {
     client ??= new OpenAI({
-      apiKey: process.env[cfg.apiKeyEnv],
-      ...(cfg.baseURL ? { baseURL: cfg.baseURL } : {}),
+      // Local runtimes ignore auth but the SDK requires a non-empty key.
+      apiKey: cfg.apiKeyEnv ? process.env[cfg.apiKeyEnv] : "local",
+      ...(baseURL() ? { baseURL: baseURL() } : {}),
     });
     return client;
   };
@@ -33,7 +45,9 @@ export function createOpenAICompatAdapter(cfg: OpenAICompatConfig): ProviderAdap
     name: cfg.name,
 
     available() {
-      return Boolean(process.env[cfg.apiKeyEnv]);
+      if (cfg.apiKeyEnv) return Boolean(process.env[cfg.apiKeyEnv]);
+      if (cfg.baseURLEnv) return Boolean(process.env[cfg.baseURLEnv]);
+      return false;
     },
 
     async complete(params: CompletionParams): Promise<CompletionResult> {

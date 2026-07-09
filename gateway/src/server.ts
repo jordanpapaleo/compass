@@ -16,6 +16,7 @@ import { getGitContext, type GitContext } from "./context/git.ts";
 import { appendLog, readLog } from "./log.ts";
 import { anthropicAdapter } from "./providers/anthropic.ts";
 import { geminiAdapter } from "./providers/gemini.ts";
+import { ollamaAdapter } from "./providers/ollama.ts";
 import { openaiAdapter } from "./providers/openai.ts";
 import { zaiAdapter } from "./providers/zai.ts";
 import { resolveMaxTokens, route } from "./router.ts";
@@ -34,6 +35,7 @@ const ADAPTERS: Record<ProviderName, ProviderAdapter> = {
   openai: openaiAdapter,
   gemini: geminiAdapter,
   zai: zaiAdapter,
+  ollama: ollamaAdapter,
 };
 
 function availableProviders(): ProviderName[] {
@@ -81,7 +83,7 @@ async function logRequest(
     input_tokens: opts.result?.inputTokens ?? null,
     output_tokens: opts.result?.outputTokens ?? null,
     cost_usd: opts.result
-      ? costUSD(decision.model, opts.result.inputTokens, opts.result.outputTokens)
+      ? costUSD(decision.model, opts.result.inputTokens, opts.result.outputTokens, decision.provider)
       : null,
     stream: opts.stream,
   };
@@ -268,7 +270,7 @@ export function createApp(): Hono {
         compass: {
           ...decision,
           latency_ms: latencyMs,
-          cost_usd: costUSD(decision.model, result.inputTokens, result.outputTokens),
+          cost_usd: costUSD(decision.model, result.inputTokens, result.outputTokens, decision.provider),
         },
       };
       return c.json(response);

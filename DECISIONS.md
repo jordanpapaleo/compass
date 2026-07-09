@@ -125,3 +125,19 @@ LM Studio use the same integration shape).
   3rd premium, 3rd cheap. `ZAI_API_KEY` in .env.
 - Benchmark claims from the email (FrontierSWE 74.4 etc.) are NOT encoded
   anywhere — routing preference is based on verified pricing only.
+
+## Provider addition — Ollama local (2026-07-08) · Day 1 gate PASSED
+
+Jordan asked about running GLM-5.2 locally. Verified hardware first: M3 Pro /
+18GB — a 753B-param MoE (~400GB quantized) is not local-feasible there; GLM
+stays on Z.ai's hosted API. BUT Ollama was already installed with qwen3:8b —
+and Ollama speaks the OpenAI protocol, so the openai-compat factory gained a
+keyless mode (`baseURLEnv` gates availability instead of an API-key env).
+
+- `ollama/<model>` passthrough (prefix stripped); tier order slots ollama
+  LAST everywhere — an 8B local model is the fallback/explicit choice, not
+  the default. The learning loop may promote it per-intent later.
+- Local cost reported as $0 (not null — free is a fact, not an unknown).
+- This delivered the spec's "offline/local-first routing" future feature
+  early, and CLOSED THE DAY 1 GATE with zero cloud quota: real completion +
+  real streaming through the gateway, logged with tokens/latency/$0 cost.

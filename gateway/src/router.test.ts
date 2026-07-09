@@ -93,7 +93,7 @@ describe("routing rules", () => {
       availableProviders: [],
     });
     expect(d.provider).toBe("anthropic"); // preference order fallback
-    expect(d.reason.join(" ")).toMatch(/NO API key/);
+    expect(d.reason.join(" ")).toMatch(/NOT configured/);
   });
 
   it("every decision carries a non-empty reason trail", () => {
@@ -172,5 +172,27 @@ describe("zai / GLM provider", () => {
   it("glm-5.2 cost computes from verified pricing", () => {
     // $1.40 in / $4.40 out per MTok
     expect(costUSD("glm-5.2", 1_000_000, 1_000_000)).toBeCloseTo(5.8);
+  });
+});
+
+describe("ollama / local provider", () => {
+  it("passthrough: ollama/<model> strips prefix and routes local", () => {
+    const d = route(req("ollama/qwen3:8b", [user("hi")]), {
+      availableProviders: ["ollama"],
+    });
+    expect(d.provider).toBe("ollama");
+    expect(d.model).toBe("qwen3:8b");
+    expect(d.rule).toBe("passthrough");
+  });
+
+  it("local-only setup: tiers fall through to ollama", () => {
+    const d = route(req("compass/coding", [user("implement a function")]), {
+      availableProviders: ["ollama"],
+    });
+    expect(d.provider).toBe("ollama");
+  });
+
+  it("local inference costs zero, not null", () => {
+    expect(costUSD("qwen3:8b", 5000, 1000, "ollama")).toBe(0);
   });
 });
