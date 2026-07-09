@@ -11,28 +11,40 @@ struct GatewaySidecar(Mutex<Option<Child>>);
 
 /// Spawn the Compass gateway as a supervised child process.
 ///
-/// Dev builds run the gateway from the repo with system `node` (>= 24, which
-/// executes TypeScript natively). Packaged builds will ship a bundled sidecar
-/// binary instead — see DECISIONS.md. Failure to spawn is non-fatal: the app
-/// still opens and the dashboard reports the gateway as offline (it may also
-/// already be running externally via `npm run dev`, which is fine — the child
-/// simply exits when the port is taken).
+/// Dev (`tauri dev`, a debug build) runs the gateway from the repo with system
+/// `node` (>= 24, native TS) for live reload. Packaged (release) builds run the
+/// bundled self-contained sidecar binary that ships inside the .app. Failure to
+/// spawn is non-fatal: the app still opens and the dashboard reports the gateway
+/// offline (an externally-run `npm run dev` also works — the child exits on port
+/// conflict).
 fn spawn_gateway() -> Option<Child> {
-    let gateway_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../gateway");
-    match Command::new("node")
-        .args(["--env-file-if-exists=.env", "src/index.ts"])
-        .current_dir(gateway_dir)
-        .spawn()
-    {
+    match build_gateway_command()?.spawn() {
         Ok(child) => {
-            println!("compass: gateway sidecar spawned (pid {})", child.id());
+            println!("compass: gateway spawned (pid {})", child.id());
             Some(child)
         }
         Err(e) => {
-            eprintln!("compass: failed to spawn gateway sidecar: {e}");
+            eprintln!("compass: failed to spawn gateway: {e}");
             None
         }
     }
+}
+
+/// Dev: run the TypeScript source from the repo with system node.
+#[cfg(debug_assertions)]
+fn build_gateway_command() -> Option<Command> {
+    let gateway_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../gateway");
+    let mut cmd = Command::new("node");
+    cmd.args(["--env-file-if-exists=.env", "src/index.ts"])
+        .current_dir(gateway_dir);
+    Some(cmd)
+}
+
+/// Packaged: run the bundled sidecar sitting next to the app executable.
+#[cfg(not(debug_assertions))]
+fn build_gateway_command() -> Option<Command> {
+    let sidecar = std::env::current_exe().ok()?.parent()?.join("compass-gateway");
+    Some(Command::new(sidecar))
 }
 
 /// Is the app-managed gateway process currently running? (Liveness of the HTTP

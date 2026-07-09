@@ -33,3 +33,7 @@ releases/**/*.app
 .env
 .env.*
 !.env.example
+
+# packaged gateway sidecar (115MB, rebuilt via gateway/build-sidecar.sh)
+src-tauri/binaries/
+gateway/build/

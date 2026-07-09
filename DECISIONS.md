@@ -204,3 +204,33 @@ always written. Failed/aborted streams are history too.
 Observed (3 genuine manual ollama picks + real openai 429s) → suggested →
 applied via UI click → compass/auto request routed by learned-override:chat
 and completed locally. Loop closed end-to-end.
+
+## Packaging — self-contained macOS app (2026-07-09)
+
+Goal: run Compass without the repo or system Node. Approach:
+- Gateway bundled to one CJS file (esbuild), then a **Node SEA single
+  executable** (`gateway/build-sidecar.sh`): esbuild → SEA blob → inject into a
+  copied `node` binary via postject → ad-hoc sign. Output goes to
+  `src-tauri/binaries/compass-gateway-<target-triple>` (Tauri's externalBin
+  naming). ~120MB (bundles the Node runtime); gitignored, rebuilt via script.
+- `index.ts` startup wrapped in an async IIFE (not top-level await) so it
+  bundles to CommonJS for SEA.
+- `tauri.conf.json` `bundle.externalBin` ships the sidecar inside the .app
+  (Contents/MacOS/compass-gateway).
+- `lib.rs` `build_gateway_command()` is cfg-split: **debug** runs the repo TS
+  with system node (live reload for `tauri dev`); **release** runs the bundled
+  sidecar next to the app executable.
+
+### Verified
+`npm run tauri build --bundles app` produces `Compass.app`; launching it starts
+the bundled gateway on :4000 with no repo/node present. In the packaged app,
+keys come from `~/.compass/config.json` via the Providers panel (no .env) —
+which is exactly why the in-app key management exists.
+
+### Outstanding
+- **Signed .dmg:** the unsigned local build's DMG *wrapper* step
+  (`bundle_dmg.sh`/create-dmg) fails; the `.app` itself builds fine. A proper
+  distributable, notarized DMG comes from `release.sh` once Apple creds are
+  filled into `sign.sh` (SIGNING.md) — that's the intended release path.
+- Build script is aarch64-only in practice (uses the host's node); cross-arch
+  would need per-target node binaries.
