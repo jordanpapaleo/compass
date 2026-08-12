@@ -18,6 +18,9 @@ dist-ssr
 sign.sh
 releases/**/*.app
 
+# incremental typecheck artifacts (tsc --noEmit)
+*.tsbuildinfo
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

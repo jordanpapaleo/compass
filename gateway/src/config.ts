@@ -84,7 +84,14 @@ export const TIER_PROVIDER_ORDER: Record<Tier, ProviderName[]> = {
   premium: ["anthropic", "openai", "gemini", "ollama"],
 };
 
-export const DEFAULT_MAX_TOKENS = 4096;
+/**
+ * Cap applied when the client sends no max_tokens. 16000, not 4096: on
+ * current-gen models (Opus 5, Sonnet 5) thinking is on by default and shares
+ * this budget with the response text, so a tight cap truncates mid-answer.
+ * 16000 leaves room for both and still returns inside the SDK's HTTP timeout
+ * on non-streaming calls — go higher only on the streaming path.
+ */
+export const DEFAULT_MAX_TOKENS = 16000;
 
 export const PORT = Number(process.env.COMPASS_PORT ?? "") || 4000;
 
