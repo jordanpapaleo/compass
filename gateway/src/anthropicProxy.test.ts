@@ -40,7 +40,7 @@ describe("pickAnthropicModel", () => {
   it("maps a non-anthropic tier pick to the Claude model for that tier", () => {
     expect(pickAnthropicModel(base)).toBe("claude-sonnet-5"); // balanced
     expect(pickAnthropicModel({ ...base, tier: "cheap" })).toBe("claude-haiku-4-5");
-    expect(pickAnthropicModel({ ...base, tier: "premium" })).toBe("claude-opus-4-8");
+    expect(pickAnthropicModel({ ...base, tier: "premium" })).toBe("claude-opus-5");
   });
 
   it("honors an explicit Claude model (passthrough)", () => {

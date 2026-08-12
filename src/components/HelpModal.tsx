@@ -75,7 +75,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <span className="code">compass/pr-review</span>
               </li>
               <li>
-                a real model id (<span className="code">claude-opus-4-8</span>,{" "}
+                a real model id (<span className="code">claude-opus-5</span>,{" "}
                 <span className="code">gpt-5.4</span>, <span className="code">ollama/qwen3:8b</span>)
                 — go straight there
               </li>

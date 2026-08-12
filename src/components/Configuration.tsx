@@ -68,11 +68,16 @@ export function Configuration({ online }: { online: boolean }) {
       .catch(() => {});
   };
 
-  const active = models?.filter((m) => m.enabled).length ?? 0;
-  const total = models?.length ?? 0;
-  const summary = online
-    ? `${active}/${total} models${temp !== null ? ` · temp ${temp}` : ""}`
-    : "gateway offline";
+  // The summary counts what can actually route: catalog entries whose provider
+  // has a key. Unconfigured models are in the list below, not in this count.
+  const ready = models?.filter((m) => m.configured) ?? [];
+  const active = ready.filter((m) => m.enabled).length;
+  const tempSuffix = temp !== null ? ` · temp ${temp}` : "";
+  const summary = !online
+    ? "gateway offline"
+    : ready.length === 0
+      ? `no provider keys yet${tempSuffix}`
+      : `${active}/${ready.length} models${tempSuffix}`;
 
   return (
     <div className="card border border-[var(--color-border)] bg-base-200">
@@ -97,7 +102,8 @@ export function Configuration({ online }: { online: boolean }) {
             {/* Gateway — routable model targets */}
             <div className="mt-4">
               <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-[var(--color-text-muted)]">
-                <Icon icon="uil:server" /> Gateway · {online ? `${active} of ${total} models` : "offline"}
+                <Icon icon="uil:server" /> Gateway ·{" "}
+                {online ? `${active} of ${ready.length} models routable` : "offline"}
               </p>
               <GatewaySection models={models} online={online} onToggle={toggleModel} />
             </div>

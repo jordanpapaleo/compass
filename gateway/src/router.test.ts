@@ -68,7 +68,7 @@ describe("routing rules", () => {
   it("compass/auto detects intent and maps tier", () => {
     const d = route(req("compass/auto", [user("Design the architecture for a queue system")]), env);
     expect(d.intent).toBe("architecture");
-    expect(d.model).toBe("claude-opus-4-8"); // premium tier
+    expect(d.model).toBe("claude-opus-5"); // premium tier
     expect(d.intent_source).toBe("detected");
   });
 
@@ -233,14 +233,14 @@ describe("preferences (Day 3)", () => {
     const d = route(req("compass/coding", [user("implement a parser")]), envAll, {
       prefs: { ...neutral, quality_cost: 10 },
     });
-    expect(d.model).toBe("claude-opus-4-8");
+    expect(d.model).toBe("claude-opus-5");
   });
 
   it("quality + accuracy both up clamps at premium", () => {
     const d = route(req("compass/architecture", [user("design the system architecture")]), envAll, {
       prefs: { ...neutral, quality_cost: 0, speed_accuracy: 100 },
     });
-    expect(d.model).toBe("claude-opus-4-8");
+    expect(d.model).toBe("claude-opus-5");
     expect(d.reason.join(" ")).toMatch(/clamped/);
   });
 
@@ -322,18 +322,18 @@ describe("failover + custom-tier routing", () => {
       customTiers: [{ provider: "groq", tier: "cheap", model: "llama-3.3-70b" }],
     });
     expect(d.provider).toBe("anthropic"); // premium tier, groq only serves cheap
-    expect(d.model).toBe("claude-opus-4-8");
+    expect(d.model).toBe("claude-opus-5");
   });
 });
 
 describe("disabled models", () => {
   it("skips a disabled model and uses the next candidate", () => {
-    // architecture → premium → anthropic/claude-opus-4-8; disable it → next available
+    // architecture → premium → anthropic/claude-opus-5; disable it → next available
     const d = route(req("compass/architecture", [user("design the architecture")]), {
       availableProviders: ["anthropic", "openai"],
-      disabledModels: ["claude-opus-4-8"],
+      disabledModels: ["claude-opus-5"],
     });
-    expect(d.model).not.toBe("claude-opus-4-8");
+    expect(d.model).not.toBe("claude-opus-5");
     expect(d.provider).toBe("openai"); // openai premium is next
     expect(d.reason.join(" ")).toMatch(/Disabled models skipped/);
   });

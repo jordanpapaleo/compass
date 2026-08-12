@@ -256,3 +256,43 @@ Claude Code speaks Anthropic's Messages API, not OpenAI's. `POST /v1/messages`
 Anthropic-shaped requests routed commit-message→haiku and architecture→opus,
 returned proper Anthropic responses with usage; streaming passed native
 message_start/... SSE through; all logged.
+
+---
+
+## Model catalog — Opus 5 + tier/catalog split (2026-08-12)
+
+### Why
+Adding a model meant editing `TIER_MODELS`, and that map holds exactly one
+model per tier — so promoting Opus 5 to premium would have evicted Opus 4.8
+from `routableModels()` and its Gateway chip, even though passthrough
+(`/^claude-/` in router.ts) still routes it fine. Tier assignment and "models
+Compass knows about" are different questions and now have different homes.
+
+### How
+- `PROVIDER_MODELS` (config.ts) — the per-provider catalog; a superset of
+  `TIER_MODELS`. `routableModels()` builds chips from it instead of from tier
+  values, so a provider can expose more models than it has tiers.
+- `TIER_MODELS.anthropic.premium` → `claude-opus-5`. Same $5/$25 as 4.8, so no
+  cost-model change; `compass/auto` architecture/premium work now lands on
+  Opus 5.
+- `claude-opus-4-8` keeps its PRICING entry and its chip — passthrough calls
+  still report real cost.
+- config.test.ts guards the invariant: every tier model must be in the catalog,
+  and every Anthropic catalog model must be priced.
+
+### Catalog is always shown; `configured` is separate from `enabled`
+`routableModels()` no longer filters by `adapter.available()`. Every known model
+is listed with two independent flags: `configured` (its provider has a key) and
+`enabled` (the user's toggle). Chips for unconfigured models render greyed with
+a "no key" label, so the catalog doubles as a menu of what a key would buy, and
+a pre-set toggle survives until the key lands — `disabled_models` is keyed by
+model id and never touched by key changes.
+
+Verified with an empty `COMPASS_DATA_DIR` and no env keys: `/v1/models` returns
+all 10 entries at `configured:false` (it returned `[]` before), and toggling an
+unconfigured model off persists to `disabled_models`.
+
+### Known limitation
+Chips toggle auto-routing candidacy only. Turning off a catalog model that
+isn't assigned to a tier is a no-op, because passthrough never consults
+`disabledModels` — true before this change too, just now visible on more chips.

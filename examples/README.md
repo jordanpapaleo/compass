@@ -86,7 +86,7 @@ tool/streaming fidelity.
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:4000
-export ANTHROPIC_MODEL=compass/auto        # or a specific model like claude-opus-4-8
+export ANTHROPIC_MODEL=compass/auto        # or a specific model like claude-opus-5
 export ANTHROPIC_API_KEY=unused-compass-has-its-own   # Claude Code wants one set; Compass ignores it
 claude
 ```

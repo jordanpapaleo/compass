@@ -7,7 +7,7 @@
  * path, no release required.
  */
 
-import { TIER_MODELS } from "./config.ts";
+import { PROVIDER_MODELS } from "./config.ts";
 import { type CustomProvider, getCustomProviders, getDisabledModels } from "./providerConfig.ts";
 import { anthropicAdapter } from "./providers/anthropic.ts";
 import { geminiAdapter } from "./providers/gemini.ts";
@@ -120,30 +120,37 @@ export interface RoutableModel {
   model: string;
   provider: string;
   enabled: boolean;
+  /** Its provider has a key (built-in) or is fully defined (custom). */
+  configured: boolean;
 }
 
 /**
- * Every model behind a configured provider — the routing-target catalog for
- * the Gateway chips. Built-in tier models + custom-provider models. Models the
- * user has turned off are marked `enabled: false`.
+ * The whole model catalog — every built-in model plus every custom-provider
+ * model, whether or not its provider is configured yet. Two independent flags:
+ * `configured` is "can this run at all" (provider has a key), `enabled` is the
+ * user's own on/off toggle, which persists across key changes so turning a
+ * provider on doesn't resurrect models they'd switched off.
+ *
+ * Disabling only removes a model from auto-routing candidates; passthrough by
+ * exact id still works.
  */
 export async function routableModels(): Promise<RoutableModel[]> {
   const disabled = new Set(await getDisabledModels());
   const out: RoutableModel[] = [];
   const seen = new Set<string>();
-  const push = (model: string, provider: string) => {
+  const push = (model: string, provider: string, configured: boolean) => {
     if (seen.has(model)) return;
     seen.add(model);
-    out.push({ model, provider, enabled: !disabled.has(model) });
+    out.push({ model, provider, enabled: !disabled.has(model), configured });
   };
   for (const name of BUILTIN_NAMES) {
-    if (!BUILTIN[name]?.available()) continue;
-    const tiers = TIER_MODELS[name as keyof typeof TIER_MODELS];
-    if (tiers) for (const m of new Set(Object.values(tiers))) push(m, name);
+    const configured = BUILTIN[name]?.available() ?? false;
+    const models = PROVIDER_MODELS[name as keyof typeof PROVIDER_MODELS];
+    if (models) for (const m of models) push(m, name, configured);
   }
   for (const c of customMeta) {
-    if (!custom[c.id]?.available()) continue;
-    for (const m of c.models) push(m, c.id);
+    const configured = custom[c.id]?.available() ?? false;
+    for (const m of c.models) push(m, c.id, configured);
   }
   return out;
 }

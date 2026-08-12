@@ -114,7 +114,7 @@ any key, add a custom model named `compass/auto`. Cursor now routes through Comp
 |---|---|
 | `compass/auto` | Detect the intent, route by rules + your sliders + learned routes |
 | `compass/<intent>` | Force an intent — e.g. `compass/pr-review`, `compass/commit-message` |
-| `claude-opus-4-8`, `gpt-5.4`, `gemini-2.5-pro`, `glm-5.2` | Passthrough to that exact model |
+| `claude-opus-5`, `gpt-5.4`, `gemini-2.5-pro`, `glm-5.2` | Passthrough to that exact model |
 | `ollama/<model>` | Straight to your local model, e.g. `ollama/qwen3:8b` |
 
 Intents: `pr-review, pr-description, commit-message, coding, debugging, planning,

@@ -18,7 +18,7 @@ client = OpenAI(
 )
 
 resp = client.chat.completions.create(
-    model="compass/auto",  # or "compass/coding", "claude-opus-4-8", "ollama/qwen3:8b"
+    model="compass/auto",  # or "compass/coding", "claude-opus-5", "ollama/qwen3:8b"
     messages=[{"role": "user", "content": "Write a Python one-liner to flatten a list of lists"}],
     max_tokens=500,
 )

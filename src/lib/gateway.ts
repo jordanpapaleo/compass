@@ -112,6 +112,8 @@ export interface RoutableModel {
   model: string;
   provider: string;
   enabled: boolean;
+  /** Its provider has a key — unconfigured models still show, greyed. */
+  configured: boolean;
 }
 
 export async function fetchModels(): Promise<RoutableModel[]> {

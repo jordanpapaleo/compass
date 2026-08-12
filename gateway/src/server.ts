@@ -195,7 +195,7 @@ export function createApp(): Hono {
     return c.json({ ok: true });
   });
 
-  // Routing-target catalog: every model behind a configured provider + on/off.
+  // Routing-target catalog: every known model, configured or not, + on/off.
   app.get("/v1/models", async (c) => c.json({ models: await routableModels() }));
 
   app.put("/v1/models/:model", async (c) => {

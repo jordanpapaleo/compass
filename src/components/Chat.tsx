@@ -13,6 +13,7 @@ const MODES: Array<{ value: string; label: string }> = [
   { value: "compass/coding", label: "Force: coding" },
   { value: "compass/architecture", label: "Force: architecture" },
   { value: "compass/summarization", label: "Force: summarization" },
+  { value: "claude-opus-5", label: "Claude Opus 5" },
   { value: "claude-opus-4-8", label: "Claude Opus 4.8" },
   { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
   { value: "gpt-5.4", label: "GPT-5.4" },
