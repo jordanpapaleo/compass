@@ -1,6 +1,6 @@
+import { Icon } from "@iconify/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { Chat } from "./components/Chat";
 import { Configuration } from "./components/Configuration";
@@ -11,14 +11,13 @@ import { fetchHealth } from "./lib/gateway";
 import { applyTheme, getTheme, type Theme } from "./lib/theme";
 
 type GatewayState = "connecting" | "online" | "offline";
-type Tab = "chat" | "dashboard";
 
 // Tauri v2 injects this; absent in the plain browser dashboard.
 const IN_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export default function App() {
   const [gateway, setGateway] = useState<GatewayState>("connecting");
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const [chatOpen, setChatOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => getTheme());
@@ -51,10 +50,12 @@ export default function App() {
     if (!IN_TAURI) return;
     const uns = [
       listen("show-help", () => setShowHelp(true)),
-      listen("open-settings", () => setTab("dashboard")),
+      listen("open-settings", () => setChatOpen(false)),
     ];
     return () => {
-      Promise.all(uns).then((fns) => fns.forEach((f) => f()));
+      Promise.all(uns).then((fns) => {
+        for (const f of fns) f();
+      });
     };
   }, []);
 
@@ -74,12 +75,20 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col bg-base-100 text-base-content">
-      <header className="flex items-center gap-3 border-b border-[var(--color-border)] px-5 py-3">
+      <header className="flex items-center gap-2 border-b border-[var(--color-border)] px-5 py-3">
         <Icon icon="uil:compass" className="text-2xl text-primary" />
-        <div className="flex-1">
-          <h1 className="text-lg font-semibold leading-none">Compass</h1>
-          <p className="text-xs text-[var(--color-text-muted)]">Personal AI routing layer</p>
-        </div>
+
+        <span className="flex-1" />
+
+        <button
+          type="button"
+          className={`btn btn-sm gap-1.5 ${chatOpen ? "btn-primary" : "btn-ghost"}`}
+          aria-label="Toggle chat"
+          aria-pressed={chatOpen}
+          onClick={() => setChatOpen((v) => !v)}
+        >
+          <Icon icon="uil:comments" className="text-lg" /> Chat
+        </button>
 
         <NotificationBell online={online} />
 
@@ -92,84 +101,79 @@ export default function App() {
           <Icon icon={theme === "dark" ? "uil:sun" : "uil:moon"} className="text-lg" />
         </button>
 
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm btn-circle"
-          aria-label="Help"
-          onClick={() => setShowHelp(true)}
-        >
-          <Icon icon="uil:question-circle" className="text-lg" />
-        </button>
-
-        {IN_TAURI ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            disabled={toggling || gateway === "connecting"}
-            onClick={() => void toggleGateway()}
-            aria-label={online ? "Stop gateway" : "Start gateway"}
-          >
-            <Icon icon={online ? "uil:pause" : "uil:play"} />
-            {online ? "Stop" : "Start"}
-          </button>
-        ) : null}
-
-        <GatewayBadge state={gateway} />
+        <GatewayBadge
+          state={gateway}
+          interactive={IN_TAURI}
+          busy={toggling}
+          onClick={IN_TAURI ? () => void toggleGateway() : undefined}
+        />
       </header>
 
-      <div className="border-b border-[var(--color-border)] px-5">
-        <div role="tablist" className="tabs tabs-bordered">
-          <button
-            type="button"
-            role="tab"
-            className={`tab ${tab === "dashboard" ? "tab-active" : ""}`}
-            onClick={() => setTab("dashboard")}
-          >
-            <Icon icon="uil:dashboard" className="mr-1" /> Dashboard
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`tab ${tab === "chat" ? "tab-active" : ""}`}
-            onClick={() => setTab("chat")}
-          >
-            <Icon icon="uil:comments" className="mr-1" /> Chat
-          </button>
-        </div>
-      </div>
-
-      <main className="min-h-0 flex-1 overflow-y-auto p-6">
-        {tab === "dashboard" ? (
+      <div className="flex min-h-0 flex-1">
+        <main className="min-h-0 flex-1 overflow-y-auto p-6">
           <div className="flex flex-col gap-4">
             <Configuration online={online} />
             <RoutingLog />
           </div>
-        ) : (
-          <div className="h-full">
-            <Chat />
-          </div>
-        )}
-      </main>
+        </main>
+
+        {chatOpen ? (
+          <aside className="flex w-[400px] shrink-0 flex-col border-l border-[var(--color-border)]">
+            <Chat onClose={() => setChatOpen(false)} />
+          </aside>
+        ) : null}
+      </div>
 
       {showHelp ? <HelpModal onClose={() => setShowHelp(false)} /> : null}
     </div>
   );
 }
 
-function GatewayBadge({ state }: { state: GatewayState }) {
-  if (state === "online") {
+function GatewayBadge({
+  state,
+  interactive = false,
+  busy = false,
+  onClick,
+}: {
+  state: GatewayState;
+  interactive?: boolean;
+  busy?: boolean;
+  onClick?: () => void;
+}) {
+  const dot =
+    state === "online" ? (
+      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-current" />
+    ) : state === "offline" ? (
+      <span className="inline-block h-2 w-2 rounded-full bg-current" />
+    ) : (
+      <span className="loading loading-spinner loading-xs" />
+    );
+
+  const label =
+    state === "online" ? "gateway online" : state === "offline" ? "gateway offline" : "connecting…";
+  const tone =
+    state === "online" ? "badge-success" : state === "offline" ? "badge-error" : "badge-ghost";
+
+  if (!interactive) {
     return (
-      <span className="badge badge-success gap-1.5">
-        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-current" /> gateway online
+      <span className={`badge ${tone} gap-1.5`}>
+        {dot} {label}
       </span>
     );
   }
-  if (state === "offline") {
-    return (
-      <span className="badge badge-error gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-current" /> gateway offline
-      </span>
-    );
-  }
-  return <span className="badge badge-ghost">connecting…</span>;
+
+  // Native app: the badge *is* the on/off switch. Click starts/stops the gateway.
+  const title = state === "online" ? "Click to stop the gateway" : "Click to start the gateway";
+  return (
+    <button
+      type="button"
+      className={`badge ${tone} gap-1.5 border-0 ${busy ? "opacity-60" : "cursor-pointer hover:brightness-110"}`}
+      disabled={busy || state === "connecting"}
+      onClick={onClick}
+      aria-label={state === "online" ? "Stop gateway" : "Start gateway"}
+      title={title}
+    >
+      {busy ? <span className="loading loading-spinner loading-xs" /> : dot} {label}
+    </button>
+  );
 }

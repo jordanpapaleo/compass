@@ -25,7 +25,7 @@ const MODES: Array<{ value: string; label: string }> = [
  * Built-in chat — a place to actually use Compass without wiring up another
  * tool. Streams through the gateway; each answer shows where it was routed.
  */
-export function Chat() {
+export function Chat({ onClose }: { onClose?: () => void }) {
   const [model, setModel] = useState("compass/auto");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
@@ -66,7 +66,11 @@ export function Chat() {
       ...turns.map((t) => ({ role: t.role, content: t.content })),
       { role: "user" as const, content: text },
     ];
-    setTurns((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
+    setTurns((prev) => [
+      ...prev,
+      { role: "user", content: text },
+      { role: "assistant", content: "" },
+    ]);
     setBusy(true);
     scrollDown();
 
@@ -102,38 +106,50 @@ export function Chat() {
   };
 
   return (
-    <div className="card flex h-full flex-col border border-[var(--color-border)] bg-base-200">
-      <div className="card-body flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col bg-base-200">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
         <div className="flex items-center gap-2">
-          <Icon icon="uil:comments" className="text-xl" />
-          <h2 className="text-base font-semibold">Chat</h2>
-          <select
-            className="select select-sm select-bordered ml-auto"
-            value={model}
-            aria-label="Routing mode"
-            onChange={(e) => setModel(e.target.value)}
-          >
-            {[...MODES, ...customModes].map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          <Icon icon="uil:comments" className="text-lg" />
+          <h2 className="text-sm font-semibold">Chat</h2>
           {turns.length > 0 ? (
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
+              className="btn btn-ghost btn-xs btn-circle"
               onClick={() => setTurns([])}
               aria-label="Clear chat"
             >
               <Icon icon="uil:trash-alt" />
             </button>
           ) : null}
+          <span className="flex-1" />
+          {onClose ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs btn-circle"
+              onClick={onClose}
+              aria-label="Close chat"
+            >
+              <Icon icon="uil:times" className="text-lg" />
+            </button>
+          ) : null}
         </div>
+
+        <select
+          className="select select-sm select-bordered w-full"
+          value={model}
+          aria-label="Routing mode"
+          onChange={(e) => setModel(e.target.value)}
+        >
+          {[...MODES, ...customModes].map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+        </select>
 
         <div
           ref={scrollRef}
-          className="min-h-[280px] flex-1 space-y-3 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-base-100 p-3"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-base-100 p-3"
         >
           {turns.length === 0 ? (
             <div className="flex h-full items-center justify-center text-center text-sm text-[var(--color-text-muted)]">
