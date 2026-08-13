@@ -23,6 +23,26 @@ else
   exit 1
 fi
 
+# Tauri only signs AND notarizes when every one of these is set; a partial
+# sign.sh produces a build Gatekeeper rejects on other machines. Fail loudly.
+MISSING=()
+for VAR in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+  [[ -n "${!VAR:-}" ]] || MISSING+=("$VAR")
+done
+if (( ${#MISSING[@]} > 0 )); then
+  echo "✗ sign.sh did not export: ${MISSING[*]} — aborting."
+  echo "  All four are required for signing + notarization. See SIGNING.md."
+  exit 1
+fi
+
+if ! security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"; then
+  echo "✗ Signing identity not found in keychain: $APPLE_SIGNING_IDENTITY"
+  echo "  Install the Developer ID Application certificate in your login keychain."
+  exit 1
+fi
+
+echo "→ Signing credentials OK ($APPLE_SIGNING_IDENTITY)"
+
 # Bump package.json and capture the new version
 NEW_VERSION=$(npm version "$BUMP" --no-git-tag-version | sed 's/^v//')
 TODAY=$(date +%Y-%m-%d)
@@ -57,24 +77,46 @@ fi
 
 echo "→ Changelog updated"
 
-# Commit and tag
+# Commit the version bump (tag after the build so a failed build leaves no tag)
 git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md
 git commit -m "chore: release v$NEW_VERSION"
-git tag "v$NEW_VERSION"
 
-echo "→ Tagged v$NEW_VERSION"
-echo "→ Building..."
+# The gateway ships as a Tauri sidecar (bundle.externalBin). It is built by a
+# separate script, so `tauri build` alone would silently package whatever stale
+# binary is sitting in src-tauri/binaries/. Always rebuild it first.
+echo "→ Building gateway sidecar..."
+./gateway/build-sidecar.sh
+
+echo "→ Building (signing + notarization can take a few minutes)..."
 
 npm run tauri build
+
+APP_PATH="src-tauri/target/release/bundle/macos/Compass.app"
+DMG_PATH="src-tauri/target/release/bundle/dmg/Compass_${NEW_VERSION}_aarch64.dmg"
+
+# Verify the artifacts are signed AND notarized before committing anything.
+# An artifact that fails any of these checks is rejected by Gatekeeper on
+# other machines and must never be shipped.
+echo "→ Verifying signature and notarization..."
+codesign --verify --deep --strict "$APP_PATH"
+xcrun stapler validate "$APP_PATH"
+if ! spctl -a -t exec -vv "$APP_PATH" 2>&1 | grep -q "Notarized Developer ID"; then
+  echo "✗ Gatekeeper does not accept the app as notarized — not committing artifacts."
+  echo "  Check the notarization log: xcrun notarytool history --apple-id \$APPLE_ID --team-id \$APPLE_TEAM_ID"
+  exit 1
+fi
+codesign --verify "$DMG_PATH"
+echo "✓ App is signed and notarized"
 
 # Copy DMG to releases/ and commit
 RELEASE_DIR="releases/v$NEW_VERSION"
 mkdir -p "$RELEASE_DIR"
-cp src-tauri/target/release/bundle/dmg/Compass_${NEW_VERSION}_aarch64.dmg "$RELEASE_DIR/" 2>/dev/null || true
-cp -r src-tauri/target/release/bundle/macos/Compass.app "$RELEASE_DIR/" 2>/dev/null || true
+cp "$DMG_PATH" "$RELEASE_DIR/"
+cp -r "$APP_PATH" "$RELEASE_DIR/" 2>/dev/null || true
 
 git add "$RELEASE_DIR/Compass_${NEW_VERSION}_aarch64.dmg"
 git commit -m "release: add Compass_${NEW_VERSION}_aarch64.dmg"
+git tag "v$NEW_VERSION"
 
 echo ""
 echo "✓ v$NEW_VERSION released"
