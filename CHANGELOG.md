@@ -1,3 +1,8 @@
+## v0.2.1 — 2026-08-13
+
+- chore: smoke-test the bundled gateway before committing release artifacts
+- fix: grant the gateway sidecar allow-jit so it survives the hardened runtime
+
 ## v0.2.0 — 2026-08-12
 
 - chore: harden release.sh — build sidecar, verify notarization, tag after build
