@@ -108,6 +108,41 @@ fi
 codesign --verify "$DMG_PATH"
 echo "✓ App is signed and notarized"
 
+# A valid signature says nothing about whether the thing runs. v0.2.0 shipped
+# signed, notarized and Gatekeeper-clean, yet the sidecar died on launch (the
+# hardened runtime denied V8 its CodeRange) and the app was dead on arrival.
+# Boot the bundled gateway and make it answer before anything gets committed.
+echo "→ Smoke-testing the bundled gateway..."
+if lsof -nP -tiTCP:4000 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "✗ Something is already listening on :4000 — stop it so the smoke test is meaningful."
+  exit 1
+fi
+
+SMOKE_LOG=$(mktemp)
+"$APP_PATH/Contents/MacOS/compass-gateway" >"$SMOKE_LOG" 2>&1 &
+SMOKE_PID=$!
+trap 'kill $SMOKE_PID 2>/dev/null || true' EXIT
+
+SMOKE_OK=""
+for _ in $(seq 1 40); do
+  if curl -sf http://localhost:4000/health >/dev/null 2>&1; then SMOKE_OK=1; break; fi
+  kill -0 $SMOKE_PID 2>/dev/null || break   # process died; stop waiting
+  sleep 0.5
+done
+
+kill $SMOKE_PID 2>/dev/null || true
+trap - EXIT
+
+if [[ -z "$SMOKE_OK" ]]; then
+  echo "✗ Bundled gateway never answered on http://localhost:4000/health — not committing artifacts."
+  echo "  Gateway output:"
+  sed 's/^/    /' "$SMOKE_LOG"
+  rm -f "$SMOKE_LOG"
+  exit 1
+fi
+rm -f "$SMOKE_LOG"
+echo "✓ Bundled gateway boots and serves /health"
+
 # Copy DMG to releases/ and commit
 RELEASE_DIR="releases/v$NEW_VERSION"
 mkdir -p "$RELEASE_DIR"
