@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    The gateway sidecar is a Node single-file executable, so V8 must map
+    writable-executable memory for its CodeRange. Notarization forces the
+    hardened runtime on, which denies that by default: without this key the
+    sidecar dies at startup with "Failed to reserve virtual memory for
+    CodeRange" and the app reports "gateway offline".
+
+    allow-jit alone is sufficient — verified against the v0.2.0 binary. Do not
+    widen this to allow-unsigned-executable-memory unless a Node upgrade
+    actually requires it.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

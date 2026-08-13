@@ -37,7 +37,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "signingIdentity": null
+      "signingIdentity": null,
+      "entitlements": "entitlements.plist"
     }
   }
 }
